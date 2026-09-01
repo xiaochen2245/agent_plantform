@@ -14,6 +14,7 @@ from app.core.middleware import CSRFMiddleware
 from app.conversations.router import router as conversations_router
 from app.db.init import dispose_engine, init_db
 from app.dify.client import DifyClient
+from app.files.router import router as files_router
 
 
 @asynccontextmanager
@@ -44,6 +45,7 @@ app.add_middleware(CSRFMiddleware)
 app.include_router(auth_router)
 app.include_router(apps_router)
 app.include_router(chat_router)
+app.include_router(files_router)
 app.include_router(conversations_router)
 app.include_router(admin_router)
 

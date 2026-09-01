@@ -74,7 +74,13 @@ async def conversation_messages(
 
     return MessagesResponse(
         messages=[
-            {"id": m.id, "role": m.role, "content": m.content, "created_at": _iso(m.created_at)}
+            {
+                "id": m.id,
+                "role": m.role,
+                "content": m.content,
+                "created_at": _iso(m.created_at),
+                "files": m.files or [],  # 契约 v4：附件元数据
+            }
             for m in rows
         ]
     )

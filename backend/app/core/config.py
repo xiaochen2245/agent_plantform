@@ -45,6 +45,9 @@ class Settings(BaseSettings):
 
     ALLOWED_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000"
 
+    # 契约 v4：上传本地卷（相对 backend cwd；测试指向 tmp 目录）
+    UPLOAD_DIR: str = "uploads"
+
     # Dify 服务 API 基址（本切片不真调，测试用 FakeDify；真实联调时指向 .226）
     DIFY_BASE_URL: str = "http://192.168.20.226"
 

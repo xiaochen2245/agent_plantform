@@ -6,6 +6,10 @@ os.environ["JWT_SECRET"] = "test-only-jwt-secret-32-bytes-minimum-padding!"
 os.environ["ENCRYPTION_KEY"] = "test-only-encryption-key"
 os.environ["ALLOWED_ORIGINS"] = "http://localhost:5173,http://localhost:8000"
 os.environ["DEBUG"] = "true"
+# 契约 v4：上传卷指向临时目录，避免测试污染真实 backend/uploads
+import tempfile as _tempfile
+
+os.environ["UPLOAD_DIR"] = _tempfile.mkdtemp(prefix="ap-uploads-")
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -16,6 +20,13 @@ get_settings.cache_clear()
 
 from app.db.init import init_db  # noqa: E402  (env 先于 import)
 from app.main import app  # noqa: E402
+
+# 测试隔离：剥离开发者本机 backend/.env 注入的 Dify 应用 key（config 导入时
+# _load_dynamic_env_keys 会写 os.environ），保证测试里 DifyClient 走缺省 demo-key，
+# 不受任何本地环境影响。
+for _k in list(os.environ):
+    if _k.startswith("DIFY_API_KEY_APP_"):
+        del os.environ[_k]
 
 
 @pytest.fixture(autouse=True)

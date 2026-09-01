@@ -39,6 +39,7 @@ def test_baseline_upgrade_creates_schema(tmp_path):
         "conversations",
         "messages",
         "refresh_tokens",
+        "upload_files",
     }
     assert expected <= tables, f"missing: {expected - tables}"
     assert "inputs_schema" in cols

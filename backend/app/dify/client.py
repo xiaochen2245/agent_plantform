@@ -65,5 +65,28 @@ class DifyClient:
         finally:
             await response.aclose()
 
+    async def upload_file(
+        self, app_id: int, filename: str, content: bytes, mime: str
+    ) -> dict | None:
+        """上传文件到 Dify /v1/files/upload（契约 v4 发送时转发）。
+
+        非流式；失败返回 None 由调用方跳过记日志（不阻断消息发送）。
+        """
+        try:
+            resp = await self._client.post(
+                "/v1/files/upload",
+                files={"file": (filename, content, mime)},
+                data={"user": "agent-platform"},
+                headers={"Authorization": f"Bearer {app_api_key(app_id)}"},
+            )
+        except httpx.HTTPError:
+            return None
+        if resp.status_code not in (200, 201):
+            return None
+        try:
+            return resp.json()
+        except ValueError:
+            return None
+
     async def aclose(self) -> None:
         await self._client.aclose()

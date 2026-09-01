@@ -54,12 +54,15 @@ export interface ChatMessage {
   usage?: { total: number };
   /** 契约 v4：user 消息可携带附件（可空） */
   files?: UploadedFile[] | null;
+  /** 契约 v6：模型思考过程（无思考为 null/undefined，不渲染面板） */
+  reasoning?: string | null;
   createdAt: number;
 }
 
 /** SSE 事件（契约 Chat 段）。 */
 export type ChatSSEEvent =
   | { event: "message"; data: { answer: string } }
+  | { event: "reasoning"; data: { content: string } }
   | { event: "message_end"; data: { metadata: { usage: { total: number } } } }
   | { event: "error"; data: { message: string } }
   | { event: "agent_done"; data: Record<string, never> };

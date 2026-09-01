@@ -23,6 +23,8 @@ class Message(Base):
     )
     role: Mapped[str] = mapped_column(String(16), nullable=False)  # 'user' | 'assistant'
     content: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    # 契约 v6：模型思考过程（无思考为 NULL；不参与检索）
+    reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
     dify_message_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     files: Mapped[list | None] = mapped_column(JSON, nullable=True)
 

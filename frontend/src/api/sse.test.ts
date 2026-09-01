@@ -69,6 +69,13 @@ describe("parseSSEEvent", () => {
     expect(parseSSEEvent({ event: "workflow_started", data: "{}" })).toBeNull();
   });
 
+  it("契约 v6：reasoning 事件解析", () => {
+    expect(parseSSEEvent({ event: "reasoning", data: '{"content":"思考中"}' })).toEqual({
+      event: "reasoning",
+      data: { content: "思考中" },
+    });
+  });
+
   it("非 JSON data 不抛异常", () => {
     expect(parseSSEEvent({ event: "message", data: "not-json" })).toEqual({
       event: "message",
@@ -98,6 +105,7 @@ describe("sendChatStream 错误分类", () => {
     const onError = vi.fn();
     await sendChatStream({ app_id: 1, query: "hi", conversation_id: "" }, {
       onMessage: () => undefined,
+      onReasoning: () => undefined,
       onMessageEnd: () => undefined,
       onError,
       onAgentDone: () => undefined,
@@ -110,6 +118,7 @@ describe("sendChatStream 错误分类", () => {
     const onError = vi.fn();
     await sendChatStream({ app_id: 1, query: "hi", conversation_id: "" }, {
       onMessage: () => undefined,
+      onReasoning: () => undefined,
       onMessageEnd: () => undefined,
       onError,
       onAgentDone: () => undefined,

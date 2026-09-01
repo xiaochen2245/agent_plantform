@@ -1,8 +1,10 @@
-import { FileImageOutlined, FileMarkdownOutlined, FilePdfOutlined, FileTextOutlined, FileWordOutlined, LockFilled, PaperClipOutlined, WarningFilled } from "@ant-design/icons";
+import { BulbOutlined, DownOutlined, FileImageOutlined, FileMarkdownOutlined, FilePdfOutlined, FileTextOutlined, FileWordOutlined, LockFilled, PaperClipOutlined, WarningFilled } from "@ant-design/icons";
 import { Button } from "antd";
 import Markdown from "./Markdown";
 import { fileKindOf, formatFileSize } from "../utils/files";
 import "../styles/markdown.css";
+import "../styles/reasoning.css";
+import { useEffect, useState } from "react";
 import type { ChatMessage, UploadedFile } from "../types";
 
 interface MessageItemProps {
@@ -35,6 +37,34 @@ function AttachmentList({ files }: { files: UploadedFile[] }) {
           </span>
         );
       })}
+    </div>
+  );
+}
+
+/** 思考过程面板（契约 v6）：无思考不渲染。
+ * 展开策略：生成中且尚无正文时默认展开；正文出现/流结束自动收起；用户手动优先。 */
+function ReasoningPanel({ text, streaming, answerEmpty }: { text: string; streaming: boolean; answerEmpty: boolean }) {
+  const [open, setOpen] = useState(streaming && answerEmpty);
+  const [userToggled, setUserToggled] = useState(false);
+  useEffect(() => {
+    if (!userToggled) setOpen(streaming && answerEmpty);
+  }, [streaming, answerEmpty, userToggled]);
+  return (
+    <div className={`reasoning-panel${open ? " open" : ""}`}>
+      <button
+        type="button"
+        className="panel-header"
+        aria-expanded={open}
+        onClick={() => {
+          setUserToggled(true);
+          setOpen((o) => !o);
+        }}
+      >
+        <BulbOutlined />
+        <span>思考过程</span>
+        <DownOutlined className="chevron" />
+      </button>
+      {open && <pre className="panel-body">{text}</pre>}
     </div>
   );
 }
@@ -75,6 +105,13 @@ export default function MessageItem({ message, onRetry, streaming }: MessageItem
 
   return (
     <div className="msg-assistant">
+      {message.reasoning && (
+        <ReasoningPanel
+          text={message.reasoning}
+          streaming={streaming && message.status === "streaming"}
+          answerEmpty={message.content === ""}
+        />
+      )}
       {message.content ? (
         <Markdown content={message.content} />
       ) : (

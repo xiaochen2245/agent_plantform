@@ -59,6 +59,8 @@ export function parseSSEEvent(e: SSEEvent): ChatSSEEvent | null {
   switch (e.event) {
     case "message":
       return { event: "message", data: data as { answer: string } };
+    case "reasoning":
+      return { event: "reasoning", data: data as { content: string } };
     case "message_end":
       return {
         event: "message_end",
@@ -76,6 +78,8 @@ export function parseSSEEvent(e: SSEEvent): ChatSSEEvent | null {
 
 export interface SendChatHandlers {
   onMessage: (delta: string) => void;
+  /** 契约 v6：思考增量（仅上游返回思考内容时出现） */
+  onReasoning: (delta: string) => void;
   onMessageEnd: (usage: { total: number }) => void;
   onError: (message: string, kind?: MessageErrorKind) => void;
   onAgentDone: (data: { conversation_id?: string }) => void;
@@ -119,6 +123,9 @@ export async function sendChatStream(
     switch (parsed.event) {
       case "message":
         handlers.onMessage(parsed.data.answer ?? "");
+        break;
+      case "reasoning":
+        handlers.onReasoning(parsed.data.content ?? "");
         break;
       case "message_end":
         handlers.onMessageEnd(parsed.data.metadata?.usage ?? { total: 0 });

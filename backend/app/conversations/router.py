@@ -80,6 +80,7 @@ async def conversation_messages(
                 "content": m.content,
                 "created_at": _iso(m.created_at),
                 "files": m.files or [],  # 契约 v4：附件元数据
+                "reasoning": m.reasoning,  # 契约 v6：思考过程（null 缺省）
             }
             for m in rows
         ]

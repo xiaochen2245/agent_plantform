@@ -8,6 +8,9 @@ function nextId(prefix: string): string {
   return `${prefix}-${Date.now()}-${seq}`;
 }
 
+/** 首轮发送的本地消息桶：真实会话 id 由后端 agent_done 回传后认领迁移 */
+const DRAFT_KEY = "__draft__";
+
 interface ChatState {
   apps: AppInfo[];
   appsLoading: boolean;
@@ -84,7 +87,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   messagesOfActive() {
     const { messagesByConv, activeConversationId } = get();
-    return activeConversationId ? messagesByConv[activeConversationId] ?? [] : [];
+    // 首轮发送（后端尚未回传真实会话 id）挂在草稿桶，认领后自动迁移
+    return messagesByConv[activeConversationId ?? DRAFT_KEY] ?? [];
   },
 
   async sendMessage(query, inputs, files) {
@@ -94,12 +98,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     lastInputs = inputs;
     lastFiles = files && files.length > 0 ? files : undefined;
 
-    // 无活跃会话时开启新会话（标题取首条问题）
-    let conversationId = state.activeConversationId;
-    if (!conversationId) {
-      conversationId = nextId("conv");
-      set({ activeConversationId: conversationId });
-    }
+    // 会话 id 语义（契约 v5）：空串=新建；真实 UUID 由后端 agent_done 回传，前端不再伪造
+    const existingId = state.activeConversationId;
+    const conversationId = existingId ?? DRAFT_KEY;
+    const sendConversationId = existingId ?? "";
 
     const userMsg: ChatMessage = {
       id: nextId("msg"),
@@ -137,13 +139,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ streaming: true });
     abortController = new AbortController();
 
-    const finish = () => {
+    const finish = (realId?: string) => {
       abortController = null;
       set({ streaming: false });
       // 会话摘要落本地（标题=首条问题截断，契约 Conversations 段）
-      const list = get().messagesByConv[conversationId as string] ?? [];
+      const summaryId = realId ?? get().activeConversationId ?? conversationId;
+      const list = get().messagesByConv[conversationId] ?? [];
       const summary: ConversationSummary = {
-        id: conversationId as string,
+        id: summaryId,
         title: query.trim().slice(0, 20),
         message_count: list.length,
         updated_at: new Date().toISOString(),
@@ -159,8 +162,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }));
     };
 
+    /** 首轮发送后认领后端回传的真实会话 id：迁移消息桶 + 激活 */
+    const adopt = (realId: string) => {
+      if (existingId || !realId || realId === conversationId) return;
+      set((s) => {
+        const bucket = s.messagesByConv[conversationId] ?? [];
+        const messagesByConv = { ...s.messagesByConv };
+        delete messagesByConv[conversationId];
+        return {
+          messagesByConv: { ...messagesByConv, [realId]: bucket },
+          activeConversationId: realId,
+        };
+      });
+    };
+
     await sendChatStream(
-      { app_id: app.id, query: query.trim(), conversation_id: conversationId, inputs, files: lastFiles?.map((f) => f.file_id) },
+      { app_id: app.id, query: query.trim(), conversation_id: sendConversationId, inputs, files: lastFiles?.map((f) => f.file_id) },
       {
         onMessage: (delta) => {
           const current = get().messagesByConv[conversationId as string] ?? [];
@@ -171,9 +188,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         onError: (message, kind) => {
           patchAssistant({ status: "error", content: message, errorKind: kind });
         },
-        onAgentDone: () => {
+        onAgentDone: (data) => {
           patchAssistant({ status: "done" });
-          finish();
+          adopt(data?.conversation_id ?? "");
+          finish(data?.conversation_id);
         },
       },
       abortController.signal

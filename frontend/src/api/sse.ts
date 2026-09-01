@@ -78,7 +78,7 @@ export interface SendChatHandlers {
   onMessage: (delta: string) => void;
   onMessageEnd: (usage: { total: number }) => void;
   onError: (message: string, kind?: MessageErrorKind) => void;
-  onAgentDone: () => void;
+  onAgentDone: (data: { conversation_id?: string }) => void;
 }
 
 /**
@@ -127,7 +127,7 @@ export async function sendChatStream(
         handlers.onError(parsed.data.message || "回答生成失败，请重试");
         break;
       case "agent_done":
-        handlers.onAgentDone();
+        handlers.onAgentDone(parsed.data ?? {});
         break;
     }
   });

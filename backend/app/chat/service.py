@@ -130,7 +130,8 @@ async def stream_dify_events(
         )
 
     if terminal:
-        yield _sse("agent_done")
+        # 契约 v5：携带我方内部会话 UUID，前端据此认领（替代伪造 id/列表回查）
+        yield _sse("agent_done", {"conversation_id": str(conversation.id)})
 
 
 async def stream_workflow_events(
@@ -222,4 +223,5 @@ async def stream_workflow_events(
         )
 
     if terminal:
-        yield _sse("agent_done")
+        # 契约 v5：携带我方内部会话 UUID，前端据此认领（替代伪造 id/列表回查）
+        yield _sse("agent_done", {"conversation_id": str(conversation.id)})

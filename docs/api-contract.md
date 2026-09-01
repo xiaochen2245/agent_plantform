@@ -97,3 +97,11 @@
 
 ## 后端语义（wave6 实现声明）
 - 校验通过后转存（MVP 本地卷）并同步上传 Dify /files/upload 换取 dify_file_id；消息发送时作为 inputs 附件变量传给 chat-messages
+
+---
+
+# v5 增补（wave6 hotfix · orchestrator 批准）
+
+## agent_done 事件携带会话 id
+- `event: agent_done` → `data: {"conversation_id":"<我方内部 UUID>"}`（原先恒为 {}）
+- 语义：前端首轮发送（conversation_id 传空串）后，凭此 id 认领会话；前端**不得**自行生成会话 id

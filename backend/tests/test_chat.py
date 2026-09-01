@@ -72,7 +72,9 @@ async def test_send_creates_conversation_and_mirrors_both_messages(client: Async
     events = _events(lines)
     assert [e for e, _ in events[:3]] == ["message", "message", "message"]
     assert events[0][1] == {"answer": "你"}
-    assert ("agent_done", {}) == events[-1]
+    # 契约 v5：agent_done 携带内部会话 UUID
+    assert events[-1][0] == "agent_done"
+    assert events[-1][1].get("conversation_id")
 
     convs = await _db_convs()
     assert len(convs) == 1
@@ -134,7 +136,9 @@ async def test_send_dify_500_yields_error_event(client: AsyncClient):
     events = _events(lines)
     assert events[0][0] == "error"
     assert "500" in events[0][1]["message"]
-    assert events[-1] == ("agent_done", {})
+    # 契约 v5：agent_done 携带内部会话 UUID
+    assert events[-1][0] == "agent_done"
+    assert events[-1][1].get("conversation_id")
 
     # 用户消息已落，assistant 无内容不落
     conv = (await _db_convs())[0]

@@ -1,14 +1,23 @@
 """建表 + dev 种子 + 存量角色迁移（lifespan 与测试共用）。
 
+建表策略：
+- 测试（drop=True）：直接 create_all（内存库，最小改动）
+- 运行时（lifespan）：优先 Alembic `upgrade head`（文件库）；失败不炸，
+  打印告警后回退 create_all（全新/异常环境仍可起）
+
 种子内容：
 - 角色 USER / PLATFORM_ADMIN
 - 管理员用户（roles JSON 同时写入，兼容迁移幂等）
-- 3 个 Agent 镜像（契约 §Apps，id 显式固定）
-- 3 个 App → 角色 USER 的授权（全员可见，保持既有 E2E 体验）
+- 4 个 Agent 镜像（契约 §Apps，id 显式固定）
+- 4 个 App → 角色 USER 的授权（全员可见，保持既有 E2E 体验）
 
 存量迁移：users.roles JSON → user_roles 行（JSON 列保留作历史快照，
 此后权限一律以 user_roles 为准，见 app/authz.py）。
 """
+import asyncio
+import logging
+from pathlib import Path
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,17 +48,50 @@ SEED_ROLES: list[tuple[int, str, str]] = [
     (2, "PLATFORM_ADMIN", "平台管理员"),
 ]
 
+_logger = logging.getLogger("app.db.init")
+_ALEMBIC_INI = Path(__file__).resolve().parents[2] / "alembic.ini"
+
+
+def _run_alembic_upgrade() -> None:
+    """同步执行 alembic upgrade head（供 to_thread 调用）。
+
+    alembic 的异步 env.py 内部 asyncio.run，不能在已运行的事件循环里直接调；
+    线程中运行则有独立循环。URL 显式注入 settings.DATABASE_URL（cfg 权威）。
+    """
+    from alembic import command
+    from alembic.config import Config
+
+    cfg = Config(str(_ALEMBIC_INI))
+    cfg.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+    command.upgrade(cfg, "head")
+
+
+async def _ensure_schema(prefer_alembic: bool) -> None:
+    """优先 Alembic 迁移；不可用时回退 create_all（不炸，仅告警）。"""
+    if prefer_alembic:
+        try:
+            await asyncio.to_thread(_run_alembic_upgrade)
+            return
+        except Exception as exc:  # noqa: BLE001  迁移失败不阻断启动
+            _logger.warning("alembic upgrade failed, falling back to create_all: %s", exc)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
 
 async def init_db(drop: bool = False) -> None:
-    """create_all + 种子 + 角色迁移。
+    """建 schema + 种子 + 角色迁移。
 
-    drop=True 仅供测试重建库；生产路径（lifespan）只增量建表，
-    并将被 Alembic 迁移替换。
+    drop=True 仅供测试重建库（内存库直接 create_all）；
+    运行时优先 Alembic（文件库）；内存库（无文件可迁移）跳过 Alembic。
     """
-    async with engine.begin() as conn:
-        if drop:
-            await conn.run_sync(Base.metadata.drop_all)
-        await conn.run_sync(Base.metadata.create_all)
+    is_memory_sqlite = settings.DATABASE_URL.endswith("://") or ":memory:" in settings.DATABASE_URL
+    if drop or is_memory_sqlite:
+        async with engine.begin() as conn:
+            if drop:
+                await conn.run_sync(Base.metadata.drop_all)
+            await conn.run_sync(Base.metadata.create_all)
+    else:
+        await _ensure_schema(prefer_alembic=True)
 
     async with SessionLocal() as session:  # type: AsyncSession
         await _seed_roles(session)

@@ -29,6 +29,9 @@ class Settings(BaseSettings):
 
     ALLOWED_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000"
 
+    # Dify 服务 API 基址（本切片不真调，测试用 FakeDify；真实联调时指向 .226）
+    DIFY_BASE_URL: str = "http://192.168.20.226"
+
     SEED_ADMIN_EMAIL: str = "admin@company.com"
     SEED_ADMIN_PASSWORD: str = "admin123"
 

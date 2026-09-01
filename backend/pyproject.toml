@@ -17,6 +17,7 @@ dependencies = [
     "httpx>=0.27.0",
     "alembic>=1.19.1",
     "python-multipart>=0.0.32",
+    "asyncpg>=0.31.0",
 ]
 
 [dependency-groups]

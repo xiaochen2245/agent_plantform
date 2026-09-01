@@ -452,8 +452,8 @@ up: ## 启动本项目所有服务
 	@echo "$(GREEN)启动 Dify（独立目录）...$(NC)"
 	cd $(DIFY_DIR) && docker compose -f docker-compose.yaml up -d
 	@echo "$(GREEN)✅ 全部启动完成$(NC)"
-	@echo "Portal:  http://localhost:5173"
-	@echo "Dify:    http://localhost/install"
+	@echo "Portal:        http://localhost:5173"
+	@echo "Dify API:      http://localhost:5001  (本项目直接调用，不暴露 Web UI)"
 
 down: ## 停止所有服务（保留数据卷）
 	@echo "$(YELLOW)停止 Dify...$(NC)"
@@ -616,11 +616,15 @@ docker compose -f docker-compose.yaml up -d
 docker compose -f docker-compose.yaml ps  # 确认 api worker web 都 healthy
 ```
 
-- [ ] **Step 5: 访问 Dify 控制台初始化**
+- [ ] **Step 5: 用 API 初始化 Dify 管理员**（不走 Web UI）
 
-浏览器访问 http://localhost/install
+```bash
+curl -X POST http://localhost:5001/v1/setup/init-admin \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@dify.local","password":"DifyAdmin123!","name":"Dify Admin"}'
+```
 
-设置管理员账号（密码 ≥ 9 字符，含大小写字母+数字），保存到 1Password/密码管理器。
+密码 ≥ 9 字符，含大小写字母+数字，保存到 1Password/密码管理器。
 
 - [ ] **Step 6: 验证 API 可达**
 

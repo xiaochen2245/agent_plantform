@@ -1,0 +1,67 @@
+# Agent Platform — container orchestration
+# Usage: docker compose -f deploy/docker-compose.yml up -d
+# Env:    copy deploy/.env.example to deploy/.env first
+#
+# NOTE (s3 slice): backend/Dockerfile and frontend/Dockerfile are owned by
+# slices s1/s2. Build contexts reference them by path; see deploy/BUILD_NOTES.md.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ap-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-agent_platform}
+      POSTGRES_USER: ${POSTGRES_USER:-agent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agent_dev_only}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agent} -d ${POSTGRES_DB:-agent_platform}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: ap-backend
+    env_file:
+      - path: .env
+        required: false   # fresh checkout can still `docker compose config` before cp .env.example .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:-agent_dev_only}@postgres:5432/${POSTGRES_DB:-agent_platform}
+    expose:
+      - "8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:8000/api/health')\" || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  frontend:
+    # Multi-stage image owned by slice s2: node:20 build -> nginx:1.25-alpine + dist.
+    # Routing config stays in this slice: bind-mounted over the stock conf.d entry.
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: ap-frontend
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/conf.d/portal.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

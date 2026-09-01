@@ -26,6 +26,7 @@ function toChatMessage(m: ConversationMessage): ChatMessage {
     content: m.content,
     status: "done",
     files: m.files ?? null, // 契约 v4：附件随回放带出
+    reasoning: m.reasoning ?? null, // 契约 v6：思考过程随回放带出（默认收起）
     createdAt: dayjs(m.created_at).valueOf(),
   };
 }

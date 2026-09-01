@@ -47,6 +47,7 @@ class MessageOut(BaseModel):
     content: str
     created_at: str
     files: list | None = None  # 契约 v4：[{file_id,name,size,mime,dify_file_id?}]
+    reasoning: str | None = None  # 契约 v6：思考过程（null 缺省）
 
 
 class MessagesResponse(BaseModel):

@@ -184,6 +184,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const m = current.find((x) => x.id === assistantMsg.id);
           patchAssistant({ content: (m?.content ?? "") + delta });
         },
+        onReasoning: (delta) => {
+          // 契约 v6：思考增量累加，与正文分开累计
+          const current = get().messagesByConv[conversationId as string] ?? [];
+          const m = current.find((x) => x.id === assistantMsg.id);
+          patchAssistant({ reasoning: (m?.reasoning ?? "") + delta });
+        },
         onMessageEnd: (usage) => patchAssistant({ usage }),
         onError: (message, kind) => {
           patchAssistant({ status: "error", content: message, errorKind: kind });

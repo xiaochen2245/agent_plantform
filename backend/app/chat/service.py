@@ -23,6 +23,18 @@ from app.models.user import User
 # 契约 v3：workflow 事件中需要丢弃的词汇（不透传给前端）
 _WORKFLOW_DROP_EVENTS = {"ping", "workflow_started", "node_started", "node_finished"}
 
+# 契约 v6：上游思考内容的可能字段（按优先级探测）
+_REASONING_FIELDS = ("reasoning_content", "reasoning", "thought")
+
+
+def _extract_reasoning(data: dict) -> str:
+    """从事件 data 里探测思考内容；同一事件可同时携带 answer 与 reasoning。"""
+    for field in _REASONING_FIELDS:
+        value = data.get(field)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
 
 def _sse(event: str, data: dict | None = None) -> str:
     payload = json.dumps(data or {}, ensure_ascii=False)
@@ -35,6 +47,7 @@ async def _persist_assistant(
     accumulated: str,
     token_usage: dict | None,
     dify_conversation_id: str | None,
+    reasoning: str = "",
 ) -> None:
     """流结束后镜像落库；独立会话，不依赖请求作用域。"""
     async with session_factory() as session:
@@ -43,7 +56,12 @@ async def _persist_assistant(
             return
         if accumulated:
             session.add(
-                Message(conversation_id=conv.id, role="assistant", content=accumulated)
+                Message(
+                    conversation_id=conv.id,
+                    role="assistant",
+                    content=accumulated,
+                    reasoning=reasoning or None,  # 契约 v6：无思考为 null
+                )
             )
             conv.message_count = (conv.message_count or 0) + 1
         if token_usage is not None:
@@ -63,6 +81,7 @@ async def stream_dify_events(
     files: list[dict] | None = None,
 ) -> AsyncIterator[str]:
     accumulated = ""
+    accumulated_reasoning = ""
     token_usage: dict | None = None
     dify_conversation_id: str | None = None
     payload = {
@@ -84,14 +103,19 @@ async def stream_dify_events(
                 terminal = True
             else:
                 current_event = ""
+                pending_event_line: str | None = None  # 契约 v6：缓冲 event 行，避免插入合成帧时撕裂分帧
                 async for line in resp.aiter_lines():
                     if not line:
-                        current_event = ""  # 事件块结束，防止下一块误用旧事件名
+                        # 帧结束；未被 data 行消费的 event 行（如纯事件帧）原样补出
+                        if pending_event_line is not None:
+                            yield pending_event_line + "\n"
+                            pending_event_line = None
+                        current_event = ""  # 防止下一块误用旧事件名
                         yield "\n"
                         continue
                     if line.startswith("event:"):
                         current_event = line.split(":", 1)[1].strip()
-                        yield line + "\n"
+                        pending_event_line = line
                         continue
                     if line.startswith("data:"):
                         raw = line.split(":", 1)[1].strip()
@@ -101,8 +125,21 @@ async def stream_dify_events(
                             data = None
                         if isinstance(data, dict):
                             ev = current_event or str(data.get("event", ""))
+                            # 契约 v6：agent_thought 独立事件 → 翻译为 reasoning，不透传原行
+                            if ev == "agent_thought":
+                                thought = _extract_reasoning(data.get("data") or {}) or _extract_reasoning(data)
+                                if thought:
+                                    accumulated_reasoning += thought
+                                    yield _sse("reasoning", {"content": thought})
+                                pending_event_line = None
+                                continue
                             if ev == "message":
                                 accumulated += str(data.get("answer", ""))
+                                # 契约 v6：同帧携带思考 → reasoning 先于原帧输出
+                                thought = _extract_reasoning(data)
+                                if thought:
+                                    accumulated_reasoning += thought
+                                    yield _sse("reasoning", {"content": thought})
                             elif ev == "message_end":
                                 usage = (data.get("metadata") or {}).get("usage")
                                 if isinstance(usage, dict):
@@ -110,7 +147,12 @@ async def stream_dify_events(
                             cid = data.get("conversation_id")
                             if cid:
                                 dify_conversation_id = str(cid)
+                        if pending_event_line is not None:
+                            yield pending_event_line + "\n"
+                            pending_event_line = None
                     yield line + "\n"
+                if pending_event_line is not None:  # 尾帧无空行结尾时补出
+                    yield pending_event_line + "\n"
                 terminal = True
     except httpx.TimeoutException:
         # 流式不重试（设计 §7.3）：直接给前端错误事件
@@ -127,6 +169,7 @@ async def stream_dify_events(
             accumulated,
             token_usage,
             dify_conversation_id,
+            accumulated_reasoning,
         )
 
     if terminal:

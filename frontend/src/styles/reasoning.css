@@ -1,0 +1,44 @@
+/* 思考过程面板（契约 v6）—— 墨青 token，等宽小字号灰阶 */
+.reasoning-panel {
+  margin-bottom: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+  overflow: hidden;
+}
+.reasoning-panel .panel-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #64748b;
+  user-select: none;
+}
+.reasoning-panel .panel-header:hover { background: #f1f5f9; }
+.reasoning-panel .panel-header .anticon { color: #14b8a6; font-size: 14px; }
+.reasoning-panel .panel-header .chevron {
+  margin-left: auto;
+  color: #94a3b8;
+  font-size: 12px;
+  transition: transform 0.15s ease;
+}
+.reasoning-panel.open .panel-header .chevron { transform: rotate(90deg); }
+.reasoning-panel .panel-body {
+  margin: 0;
+  padding: 10px 14px;
+  border-top: 1px dashed #e2e8f0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #64748b;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow-y: auto;
+}

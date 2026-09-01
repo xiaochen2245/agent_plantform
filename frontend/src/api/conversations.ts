@@ -12,6 +12,8 @@ export interface ConversationMessage {
   content: string;
   created_at: string;
   files?: UploadedFile[] | null;
+  /** 契约 v6：思考过程（无思考为 null） */
+  reasoning?: string | null;
 }
 
 export async function fetchConversations(appId: number): Promise<ConversationSummary[]> {

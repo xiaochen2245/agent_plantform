@@ -1,7 +1,8 @@
 # Agent Platform backend
 FROM python:3.12-slim
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+# uv 经 pip 安装（避免 ghcr 镜像源依赖；网络受限环境下更稳）
+RUN pip install --no-cache-dir uv
 
 WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1

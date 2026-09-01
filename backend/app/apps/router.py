@@ -25,7 +25,13 @@ async def my_apps(
     rows = (await db.execute(stmt)).scalars().all()
     return AppsResponse(
         apps=[
-            {"id": r.id, "name": r.name, "description": r.description, "mode": r.mode}
+            {
+                "id": r.id,
+                "name": r.name,
+                "description": r.description,
+                "mode": r.mode,
+                "inputs_schema": r.inputs_schema,
+            }
             for r in rows
         ]
     )

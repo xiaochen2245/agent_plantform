@@ -21,9 +21,17 @@ const ME: MeInfo = {
 };
 
 const APPS: AppInfo[] = [
-  { id: 1, name: "IT 运维助手", description: "解答服务器、网络与账号问题", mode: "chat" },
-  { id: 2, name: "报销政策问答", description: "差旅与报销规则查询", mode: "chat" },
-  { id: 3, name: "代码评审助手", description: "MR 预审与规范检查", mode: "agent" },
+  { id: 1, name: "IT 运维助手", description: "解答服务器、网络与账号问题", mode: "chat", inputs_schema: null },
+  { id: 2, name: "报销政策问答", description: "差旅与报销规则查询", mode: "chat", inputs_schema: null },
+  { id: 3, name: "代码评审助手", description: "MR 预审与规范检查", mode: "agent", inputs_schema: null },
+  // 契约 v3：工作流模式应用（必填输入 business_card）
+  {
+    id: 4,
+    name: "名片生成助手",
+    description: "输入名片信息，生成排版名片",
+    mode: "workflow",
+    inputs_schema: [{ name: "business_card", label: "名片内容", type: "paragraph", required: true }],
+  },
 ];
 
 const CONVERSATIONS: ConversationSummary[] = [
@@ -141,7 +149,7 @@ export const handlers = [
   }),
 
   mswHttp.post("/api/chat/send", async ({ request }) => {
-    const body = (await request.json()) as { query?: string };
+    const body = (await request.json()) as { query?: string; inputs?: Record<string, string> };
     const query = body.query ?? "";
     const encoder = new TextEncoder();
 
@@ -151,7 +159,13 @@ export const handlers = [
           controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
 
         try {
-          if (query.includes("失败")) {
+          if (body.inputs && Object.keys(body.inputs).length > 0) {
+            // 契约 v3：workflow 应用按表单生成（mock 简单返回）
+            send("message", { answer: "已按表单内容生成结果：" });
+            await delay(80);
+            send("message", { answer: query });
+            await delay(80);
+          } else if (query.includes("失败")) {
             await delay(300);
             send("error", { message: "回答生成失败，请重试" });
             controller.close();

@@ -8,11 +8,20 @@ export interface MeInfo {
   dept_id: number | null;
 }
 
+export interface AppInputField {
+  name: string;
+  label?: string;
+  type: "text" | "paragraph" | string;
+  required?: boolean;
+}
+
 export interface AppInfo {
   id: number;
   name: string;
   description: string;
   mode: "chat" | "agent" | "workflow" | string;
+  /** 契约 v3：仅 workflow 应用非空 */
+  inputs_schema?: AppInputField[] | null;
 }
 
 export interface ConversationSummary {
@@ -49,4 +58,6 @@ export interface ChatSendRequest {
   app_id: number;
   query: string;
   conversation_id: string;
+  /** 契约 v3：workflow 应用变量透传 */
+  inputs?: Record<string, string>;
 }

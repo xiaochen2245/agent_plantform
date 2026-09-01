@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Agent 平台 - 工作流编排</title>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&amp;family=Inter:wght@400;500;600&amp;family=Noto+Sans+SC:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,300,0..1,0" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+<style>
+  body { font-family:'Inter','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif; }
+  .font-display { font-family:'Montserrat','Noto Sans SC',sans-serif; }
+  .material-symbols-outlined { font-variation-settings:'FILL' 0,'wght' 400,'GRAD' 0,'opsz' 24; font-size:20px; }
+  .eyebrow { font-size:11px; font-weight:600; letter-spacing:0.14em; text-transform:uppercase; color:#14B8A6; }
+  .canvas-bg { background-image:radial-gradient(circle, rgba(15,23,42,.08) 1px, transparent 1px); background-size:20px 20px; }
+  .wf-node { position:absolute; width:168px; background:#fff; border-radius:14px; box-shadow:0 1px 2px rgba(15,23,42,.05),0 8px 20px -6px rgba(15,23,42,.10); ring:1px; }
+  .wf-node .ring1 { box-shadow:0 0 0 1px rgba(15,23,42,.06),0 1px 2px rgba(15,23,42,.05),0 8px 20px -6px rgba(15,23,42,.10); }
+  .wf-node.selected { box-shadow:0 0 0 2px #0F766E,0 12px 28px -8px rgba(15,118,110,.35); }
+  .port { position:absolute; width:10px; height:10px; border-radius:9999px; background:#fff; border:2px solid #CBD5E1; top:50%; transform:translateY(-50%); }
+  .port.in { left:-5px; } .port.out { right:-5px; }
+  .palette-item:hover { background:#0F766E/[.06]; }
+  .edge-label { position:absolute; font-size:10px; font-weight:600; color:#0F766E; background:#E6F7F4; padding:1px 7px; border-radius:9999px; }
+</style>
+</head>
+<body class="h-screen w-screen overflow-hidden bg-[#F8FAFC] text-[#0F172A] antialiased selection:bg-[#0F766E] selection:text-white flex flex-col">
+
+<!-- ══ Top Toolbar ══ -->
+<header class="h-14 bg-white border-b border-[#E2E8F0] flex items-center gap-4 px-5 shrink-0 z-20">
+  <button class="p-1.5 rounded-lg text-[#64748B] hover:text-[#0F172A] hover:bg-[#F1F5F9] transition-colors"><span class="material-symbols-outlined">arrow_back</span></button>
+  <div class="flex items-center gap-2.5">
+    <span class="text-[11px] text-[#94A3B8] font-medium">工作流 /</span>
+    <span class="font-display text-[15px] font-semibold tracking-[-0.01em]">报销政策问答 · 编排</span>
+  </div>
+  <span class="flex items-center gap-1.5 text-[11px] text-[#94A3B8]"><span class="w-1.5 h-1.5 rounded-full bg-[#14B8A6]"></span>已自动保存 · 14:32</span>
+  <div class="flex-1"></div>
+  <div class="flex items-center gap-1 mr-2 border border-[#E2E8F0] rounded-lg overflow-hidden">
+    <button class="px-2.5 py-1.5 text-[#64748B] hover:bg-[#F1F5F9] transition-colors"><span class="material-symbols-outlined" style="font-size:17px">zoom_out</span></button>
+    <span class="text-[12px] font-semibold text-[#64748B] w-10 text-center tabular-nums">100%</span>
+    <button class="px-2.5 py-1.5 text-[#64748B] hover:bg-[#F1F5F9] transition-colors"><span class="material-symbols-outlined" style="font-size:17px">zoom_in</span></button>
+  </div>
+  <button class="h-9 px-4 rounded-[10px] border border-[#E2E8F0] bg-white text-[13px] font-semibold text-[#475569] hover:bg-[#F8FAFC] transition-colors flex items-center gap-1.5">
+    <span class="material-symbols-outlined" style="font-size:17px">play_arrow</span>测试运行
+  </button>
+  <button class="h-9 px-4 rounded-[10px] bg-[#0F766E] text-white text-[13px] font-semibold hover:bg-[#0d6a63] transition-colors shadow-[0_1px_2px_rgba(15,23,42,.06),0_4px_10px_-2px_rgba(15,118,110,.35)]">发布更新</button>
+</header>
+
+<div class="flex-1 flex min-h-0">
+
+  <!-- ══ Left: Node Palette ══ -->
+  <aside class="w-[228px] bg-white border-r border-[#E2E8F0] flex flex-col shrink-0">
+    <div class="p-3 border-b border-[#F1F5F9]">
+      <div class="relative">
+        <span class="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-[17px] text-[#94A3B8]">search</span>
+        <input placeholder="搜索节点" class="w-full h-9 pl-9 pr-3 rounded-[10px] border border-[#E2E8F0] bg-[#F8FAFC] text-[13px] placeholder:text-[#B6C2CF] focus:outline-none focus:border-[#0F766E] focus:ring-[3px] focus:ring-[#0F766E]/[.12] focus:bg-white transition-all"/>
+      </div>
+    </div>
+    <div class="flex-1 overflow-y-auto p-2 space-y-4">
+      <div>
+        <div class="px-2.5 py-1.5 text-[11px] font-semibold tracking-[0.08em] text-[#94A3B8]">基础</div>
+        <div class="palette-item flex items-center gap-2.5 px-2.5 py-2 rounded-[10px] cursor-grab transition-colors"><span class="material-symbols-outlined text-[18px] text-[#0F766E]">play_circle</span><span class="text-[13px] font-medium">开始</span></div>
+        <div class="palette-item flex items-center gap-2.5 px-2.5 py-2 rounded-[10px] cursor-grab transition-colors"><span class="material-symbols-outlined text-[18px] text-[#0F766E]">stop_circle</span><span class="text-[13px] font-medium">结束</span></div>
+        <div class="palette-item flex items-center gap-2.5 px-2.5 py-2 rounded-[10px] cursor-grab transition-colors"><span class="material-symbols-outlined text-[18px] text-[#0F766E]">chat</span><span class="text-[13px] font-medium">直接回复</span></div>
+      </div>
+      <div>
+        <div class="px-2.5 py-1.5 text-[11px] font-semibold tracking-[0.08em] text-[#94A3B8]">逻辑控制</div>
+        <div class="palette-item flex items-center gap-2.5 px-2.5 py-2 rounded-[10px] cursor-grab transition-colors"><span class="material-symbols-outlined text-[18px] text-[#7C3AED]">alt_route</span><span class="text-[13px] font-medium">条件分支</span></div>
+        <div class="palette-item flex items-center gap-2.5 px-2.5 py-2 rounded-[10px] cursor-grab transition-colors"><span class="material-symbols-outlined text-[18px] text-[#7C3AED]">repeat</span><span class="text-[13px] font-medium">循环执行</span></div>
+        <div class="palette-item flex items-center gap-2.5 px-2.5 py-2 rounded-[10px] cursor-grab transition-colors"><span class="material-symbols-outlined text-[18px] text-[#7C3AED]">swap_horiz</span><span class="text-[13px] font-medium">变量赋值</span></div>
+      </div>
+      <div>
+        <div class="px-2.5 py-1.5 text-[11px] font-semibold tracking-[0.08em] text-[#94A3B8]">能力节点</div>
+        <div class="palette-item flex items-center gap-2.5 px-2.5 py-2 rounded-[10px] cursor-grab transition-colors bg-[#0F766E]/[.07]"><span class="material-symbols-outlined text-[18px] text-[#D97706]">auto_awesome</span><span class="text-[13px] font-semibold">LLM 推理</span></div>
+        <div class="palette-item flex items-center gap-2.5 px-2.5 py-2 rounded-[10px] cursor-grab transition-colors"><span class="material-symbols-outlined text-[18px] text-[#D97706]">manage_search</span><span class="text-[13px] font-medium">知识检索</span></div>
+        <div class="palette-item flex items-center gap-2.5 px-2.5 py-2 rounded-[10px] cursor-grab transition-colors"><span class="material-symbols-outlined text-[18px] text-[#D97706]">category</span><span class="text-[13px] font-medium">问题分类</span></div>
+        <div class="palette-item flex items-center gap-2.5 px-2.5 py-2 rounded-[10px] cursor-grab transition-colors"><span class="material-symbols-outlined text-[18px] text-[#D97706]">code</span><span class="text-[13px] font-medium">代码执行</span></div>
+        <div class="palette-item flex items-center gap-2.5 px-2.5 py-2 rounded-[10px] cursor-grab transition-colors"><span class="material-symbols-outlined text-[18px] text-[#D97706]">http</span><span class="text-[13px] font-medium">HTTP 请求</span></div>
+      </div>
+    </div>
+    <div class="p-3 border-t border-[#F1F5F9] text-[11px] leading-[1.6] text-[#94A3B8]">拖拽节点到画布<br/>从节点边缘拉出连线</div>
+  </aside>
+
+  <!-- ══ Center: Canvas ══ -->
+  <main class="flex-1 relative canvas-bg overflow-hidden">
+    <!-- SVG edges -->
+    <svg class="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 1000 560" preserveAspectRatio="none">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 1 L 9 5 L 0 9 z" fill="#94A3B8"/>
+        </marker>
+      </defs>
+      <path d="M 222 130 C 252 130, 252 210, 282 210" stroke="#94A3B8" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+      <path d="M 452 210 C 482 210, 482 124, 512 124" stroke="#94A3B8" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+      <path d="M 682 124 C 712 124, 712 84, 742 84" stroke="#94A3B8" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+      <path d="M 682 124 C 712 124, 712 246, 742 246" stroke="#CBD5E1" stroke-width="1.6" stroke-dasharray="4 4" fill="none" marker-end="url(#arrow)"/>
+      <path d="M 912 246 C 950 246, 950 420, 600 420 C 340 420, 340 380, 340 342" stroke="#94A3B8" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+      <path d="M 912 84 L 962 84" stroke="#94A3B8" stroke-width="0" fill="none"/>
+    </svg>
+
+    <!-- Node: 开始 -->
+    <div class="wf-node ring1" style="left:54px; top:104px;">
+      <div class="port out"></div>
+      <div class="px-3.5 py-3">
+        <div class="flex items-center gap-2 mb-1.5"><span class="material-symbols-outlined text-[17px] text-[#0F766E]">play_circle</span><span class="text-[12px] font-bold">开始</span></div>
+        <div class="text-[11px] text-[#94A3B8] leading-snug">输入：用户问题<br/>变量：query, dept</div>
+      </div>
+    </div>
+
+    <!-- Node: 知识检索 -->
+    <div class="wf-node ring1" style="left:282px; top:184px;">
+      <div class="port in"></div><div class="port out"></div>
+      <div class="px-3.5 py-3">
+        <div class="flex items-center gap-2 mb-1.5"><span class="material-symbols-outlined text-[17px] text-[#D97706]">manage_search</span><span class="text-[12px] font-bold">知识检索</span></div>
+        <div class="text-[11px] text-[#94A3B8] leading-snug">知识库：报销制度 v3<br/>TopK 5 · 相似度 0.7</div>
+      </div>
+    </div>
+
+    <!-- Node: LLM (selected) -->
+    <div class="wf-node selected" style="left:512px; top:98px;">
+      <div class="port in"></div><div class="port out"></div>
+      <div class="px-3.5 py-3">
+        <div class="flex items-center gap-2 mb-1.5"><span class="material-symbols-outlined text-[17px] text-[#D97706]">auto_awesome</span><span class="text-[12px] font-bold">LLM 推理</span><span class="ml-auto w-1.5 h-1.5 rounded-full bg-[#14B8A6]"></span></div>
+        <div class="text-[11px] text-[#94A3B8] leading-snug">glm-4.7 · 温度 0.3<br/>角色：报销政策专员</div>
+      </div>
+    </div>
+
+    <!-- Node: 直接回复 -->
+    <div class="wf-node ring1" style="left:742px; top:58px;">
+      <div class="port in"></div>
+      <div class="px-3.5 py-3">
+        <div class="flex items-center gap-2 mb-1.5"><span class="material-symbols-outlined text-[17px] text-[#0F766E]">chat</span><span class="text-[12px] font-bold">直接回复</span></div>
+        <div class="text-[11px] text-[#94A3B8] leading-snug">{{llm_1.answer}}</div>
+      </div>
+    </div>
+
+    <!-- Node: HTTP 请求 -->
+    <div class="wf-node ring1" style="left:742px; top:220px;">
+      <div class="port in"></div><div class="port out"></div>
+      <div class="px-3.5 py-3">
+        <div class="flex items-center gap-2 mb-1.5"><span class="material-symbols-outlined text-[17px] text-[#D97706]">http</span><span class="text-[12px] font-bold">查审批系统</span></div>
+        <div class="text-[11px] text-[#94A3B8] leading-snug">GET /oa/approvals<br/>超时 10s · 重试 2</div>
+      </div>
+    </div>
+
+    <div class="edge-label" style="left:696px; top:62px;">命中</div>
+    <div class="edge-label" style="left:696px; top:238px; color:#94A3B8; background:#F1F5F9;">未命中</div>
+
+    <!-- empty hint -->
+    <div class="absolute left-1/2 -translate-x-1/2 bottom-20 text-[11px] text-[#B6C2CF] bg-white/80 backdrop-blur px-3 py-1.5 rounded-full border border-[#E2E8F0]">双击节点查看配置 · 空白处右键快速添加</div>
+  </main>
+
+  <!-- ══ Right: Node Config ══ -->
+  <aside class="w-[304px] bg-white border-l border-[#E2E8F0] flex flex-col shrink-0">
+    <div class="px-5 py-4 border-b border-[#F1F5F9] flex items-center gap-2.5">
+      <span class="material-symbols-outlined text-[19px] text-[#D97706]">auto_awesome</span>
+      <div>
+        <div class="text-[14px] font-bold leading-tight">LLM 推理</div>
+        <div class="text-[11px] text-[#94A3B8]">节点 ID · llm_1</div>
+      </div>
+      <button class="ml-auto p-1.5 rounded-lg text-[#94A3B8] hover:text-[#DC2626] hover:bg-red-50 transition-colors"><span class="material-symbols-outlined text-[18px]">delete</span></button>
+    </div>
+    <div class="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+      <div>
+        <label class="block text-[12px] font-semibold text-[#64748B] mb-2 tracking-[0.05em]">模型</label>
+        <button class="w-full h-10 px-3 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] flex items-center justify-between text-[13px] font-medium hover:border-[#0F766E]/40 transition-colors">
+          <span class="flex items-center gap-2"><span class="material-symbols-outlined text-[17px] text-[#0F766E]">bolt</span>glm-4.7</span>
+          <span class="material-symbols-outlined text-[17px] text-[#94A3B8]">expand_more</span>
+        </button>
+      </div>
+      <div>
+        <div class="flex items-center justify-between mb-2"><label class="text-[12px] font-semibold text-[#64748B] tracking-[0.05em]">温度</label><span class="text-[12px] font-semibold text-[#0F766E] tabular-nums">0.3</span></div>
+        <div class="h-1.5 rounded-full bg-[#F1F5F9] relative"><div class="absolute inset-y-0 left-0 w-[30%] rounded-full bg-[#0F766E]"></div><div class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-white border-2 border-[#0F766E] shadow" style="left:30%"></div></div>
+      </div>
+      <div>
+        <label class="block text-[12px] font-semibold text-[#64748B] mb-2 tracking-[0.05em]">系统提示词</label>
+        <div class="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-3 text-[12px] leading-[1.7] text-[#475569] font-mono">你是公司报销政策专员。<br/>仅依据检索到的制度文档回答；<br/>引用条款时标注出处编号。</div>
+      </div>
+      <div>
+        <label class="block text-[12px] font-semibold text-[#64748B] mb-2 tracking-[0.05em]">上下文变量</label>
+        <div class="flex flex-wrap gap-1.5">
+          <span class="px-2.5 py-1 rounded-lg bg-[#0F766E]/[.08] text-[#0F766E] text-[11px] font-semibold">{{query}}</span>
+          <span class="px-2.5 py-1 rounded-lg bg-[#0F766E]/[.08] text-[#0F766E] text-[11px] font-semibold">{{retrieval.chunk}}</span>
+          <span class="px-2.5 py-1 rounded-lg bg-[#0F766E]/[.08] text-[#0F766E] text-[11px] font-semibold">{{dept}}</span>
+          <button class="px-2 py-1 rounded-lg border border-dashed border-[#CBD5E1] text-[#94A3B8] text-[11px] font-medium hover:border-[#0F766E] hover:text-[#0F766E] transition-colors">+ 插入</button>
+        </div>
+      </div>
+      <div>
+        <label class="block text-[12px] font-semibold text-[#64748B] mb-2 tracking-[0.05em]">输出变量</label>
+        <div class="flex items-center justify-between px-3 py-2.5 rounded-xl border border-[#E2E8F0]">
+          <code class="text-[12px] text-[#0F766E] font-semibold">llm_1.answer</code>
+          <span class="text-[11px] text-[#94A3B8]">string</span>
+        </div>
+      </div>
+    </div>
+    <div class="px-5 py-4 border-t border-[#F1F5F9] flex gap-2">
+      <button class="flex-1 h-9 rounded-[10px] border border-[#E2E8F0] text-[13px] font-semibold text-[#475569] hover:bg-[#F8FAFC] transition-colors">删除节点</button>
+      <button class="flex-1 h-9 rounded-[10px] bg-[#0F766E] text-white text-[13px] font-semibold hover:bg-[#0d6a63] transition-colors">保存配置</button>
+    </div>
+  </aside>
+</div>
+
+<!-- ══ Bottom: Run Log ══ -->
+<footer class="h-9 bg-white border-t border-[#E2E8F0] flex items-center gap-4 px-5 shrink-0 cursor-pointer hover:bg-[#F8FAFC] transition-colors">
+  <span class="flex items-center gap-1.5 text-[12px] font-semibold text-[#475569]"><span class="material-symbols-outlined text-[16px]">terminal</span>运行日志</span>
+  <span class="text-[11px] text-[#94A3B8]">上次测试 · 3 节点 · 2.4s · 通过</span>
+  <span class="ml-auto material-symbols-outlined text-[16px] text-[#94A3B8]">keyboard_arrow_up</span>
+</footer>
+</body>
+</html>

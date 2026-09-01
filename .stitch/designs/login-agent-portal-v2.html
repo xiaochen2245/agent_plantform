@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Agent 平台 - 登录</title>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&amp;family=Inter:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        "colors": {
+                "primary": "#005c55",
+                "secondary-fixed-dim": "#4fdbc8",
+                "on-tertiary-fixed-variant": "#72361b",
+                "on-surface": "#191c1e",
+                "outline-variant": "#bdc9c6",
+                "inverse-on-surface": "#eff1f3",
+                "secondary-fixed": "#71f8e4",
+                "on-tertiary": "#ffffff",
+                "on-primary-fixed": "#00201d",
+                "surface-container": "#eceef0",
+                "background": "#f7f9fb",
+                "surface-container-lowest": "#ffffff",
+                "on-secondary-fixed": "#00201c",
+                "on-secondary-fixed-variant": "#005048",
+                "on-primary": "#ffffff",
+                "tertiary": "#7f4025",
+                "surface-container-highest": "#e0e3e5",
+                "outline": "#6e7977",
+                "on-primary-fixed-variant": "#00504a",
+                "on-secondary": "#ffffff",
+                "crimson-error": "#DC2626",
+                "secondary": "#006b5f",
+                "tertiary-fixed-dim": "#ffb598",
+                "on-secondary-container": "#006f64",
+                "surface-variant": "#e0e3e5",
+                "surface-bright": "#f7f9fb",
+                "primary-fixed-dim": "#80d5cb",
+                "on-error": "#ffffff",
+                "surface-container-high": "#e6e8ea",
+                "inverse-primary": "#80d5cb",
+                "ink-text": "#0F172A",
+                "on-tertiary-fixed": "#370e00",
+                "on-surface-variant": "#3e4947",
+                "surface-container-low": "#f2f4f6",
+                "mist-surface": "#FFFFFF",
+                "primary-fixed": "#9cf2e8",
+                "secondary-container": "#6df5e1",
+                "error-container": "#ffdad6",
+                "code-bg": "#F1F5F9",
+                "on-primary-container": "#a3faef",
+                "error": "#ba1a1a",
+                "surface-dim": "#d8dadc",
+                "on-error-container": "#93000a",
+                "tertiary-fixed": "#ffdbce",
+                "fog-gray-text": "#64748B",
+                "primary-container": "#0f766e",
+                "surface": "#f7f9fb",
+                "tertiary-container": "#9c573a",
+                "on-tertiary-container": "#ffe5db",
+                "amber-warning": "#D97706",
+                "on-background": "#191c1e",
+                "surface-tint": "#006a63",
+                "graphite-border": "#E2E8F0",
+                "inverse-surface": "#2d3133"
+        },
+        "borderRadius": {
+                "DEFAULT": "0.25rem",
+                "lg": "0.5rem",
+                "xl": "0.75rem",
+                "full": "9999px"
+        },
+        "spacing": {
+                "padding-card": "20px",
+                "gutter-grid": "16px",
+                "unit": "4px",
+                "max-width-chat": "760px",
+                "margin-page": "24px"
+        },
+        "fontFamily": {
+                "title-lg": [
+                        "Montserrat"
+                ],
+                "body-lg": [
+                        "Inter"
+                ],
+                "display-md": [
+                        "Montserrat"
+                ],
+                "title-md": [
+                        "Montserrat"
+                ],
+                "label-md": [
+                        "Inter"
+                ],
+                "display-lg": [
+                        "Montserrat"
+                ],
+                "body-md": [
+                        "Inter"
+                ],
+                "caption": [
+                        "Inter"
+                ]
+        },
+        "fontSize": {
+                "title-lg": [
+                        "18px",
+                        {
+                                "lineHeight": "24px",
+                                "fontWeight": "600"
+                        }
+                ],
+                "body-lg": [
+                        "15px",
+                        {
+                                "lineHeight": "24px",
+                                "fontWeight": "400"
+                        }
+                ],
+                "display-md": [
+                        "20px",
+                        {
+                                "lineHeight": "28px",
+                                "letterSpacing": "-0.01em",
+                                "fontWeight": "600"
+                        }
+                ],
+                "title-md": [
+                        "16px",
+                        {
+                                "lineHeight": "24px",
+                                "fontWeight": "600"
+                        }
+                ],
+                "label-md": [
+                        "12px",
+                        {
+                                "lineHeight": "16px",
+                                "fontWeight": "500"
+                        }
+                ],
+                "display-lg": [
+                        "24px",
+                        {
+                                "lineHeight": "32px",
+                                "letterSpacing": "-0.02em",
+                                "fontWeight": "600"
+                        }
+                ],
+                "body-md": [
+                        "14px",
+                        {
+                                "lineHeight": "22px",
+                                "fontWeight": "400"
+                        }
+                ],
+                "caption": [
+                        "12px",
+                        {
+                                "lineHeight": "16px",
+                                "fontWeight": "400"
+                        }
+                ]
+        }
+    }
+  }
+</script>
+<style>
+  .material-symbols-outlined {
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  }
+</style>
+</head>
+<body class="bg-background text-on-surface font-body-md h-screen w-screen overflow-hidden flex flex-col md:flex-row antialiased selection:bg-primary-container selection:text-white">
+<!-- Left Brand Panel (55%) -->
+<div class="hidden md:flex md:w-[55%] bg-[#F8FAFC] flex-col justify-center px-12 lg:px-24 border-r border-graphite-border">
+<div class="max-w-md">
+<!-- Product Wordmark -->
+<h1 class="font-display-lg text-display-lg text-primary-container mb-4 font-bold tracking-tight">Agent 平台</h1>
+<!-- Tagline -->
+<p class="font-body-lg text-body-lg text-ink-text font-medium mb-12">企业智能助手 · 一个入口，问所有事</p>
+<!-- Capabilities List -->
+<ul class="space-y-4">
+<li class="flex items-center text-on-surface-variant font-body-md">
+<span class="w-2 h-2 rounded-full bg-[#14B8A6] mr-3"></span>
+          IT 运维问答
+        </li>
+<li class="flex items-center text-on-surface-variant font-body-md">
+<span class="w-2 h-2 rounded-full bg-[#14B8A6] mr-3"></span>
+          报销政策查询
+        </li>
+<li class="flex items-center text-on-surface-variant font-body-md">
+<span class="w-2 h-2 rounded-full bg-[#14B8A6] mr-3"></span>
+          代码评审助手
+        </li>
+</ul>
+</div>
+</div>
+<!-- Right Auth Area (45%) -->
+<div class="w-full md:w-[45%] h-full bg-mist-surface flex items-center justify-center p-6 sm:p-12 relative">
+<!-- Login Card Container -->
+<div class="w-full max-w-[400px] rounded-xl shadow-[0_10px_25px_-5px_rgba(0,0,0,0.04)] bg-white p-10">
+<!-- Mobile Header (Hidden on Desktop) -->
+<div class="md:hidden mb-8 text-center">
+<h1 class="flex items-center justify-center gap-2 text-[32px] font-bold text-primary-container mb-2 tracking-[-0.04em]"><span class="material-symbols-outlined text-[32px]">smart_toy</span>Agent 平台</h1>
+<p class="font-body-md text-body-md text-ink-text font-medium">企业智能助手 · 一个入口，问所有事</p>
+</div>
+<!-- Title -->
+<h2 class="text-[28px] font-semibold text-on-surface mb-8 tracking-[-0.02em]">登录</h2>
+<form class="space-y-6" onsubmit="event.preventDefault();">
+<!-- Email Input -->
+<div>
+<label class="block text-[12px] font-medium text-[#64748B] mb-2 tracking-[0.05em]" for="email">企业邮箱</label>
+<div class="relative"><span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[#94A3B8] text-[20px]">mail</span><input class="w-full h-[48px] pl-10 pr-4 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] text-on-surface font-body-md focus:outline-none focus:border-[#0F766E] focus:ring-2 focus:ring-[#0F766E]/15 transition-all" id="email" name="email" placeholder="yourname@company.com" required="" type="email"/></div>
+</div>
+<!-- Password Input -->
+<div>
+<label class="block text-[12px] font-medium text-[#64748B] mb-2 tracking-[0.05em]" for="password">密码</label>
+<div class="relative"><span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[#94A3B8] text-[20px]">lock</span><input class="w-full h-[48px] pl-10 pr-12 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] text-on-surface font-body-md focus:outline-none focus:border-[#0F766E] focus:ring-2 focus:ring-[#0F766E]/15 transition-all" id="password" name="password" placeholder="••••••••" required="" type="password"/><button aria-label="Toggle password visibility" class="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface transition-colors focus:outline-none flex items-center justify-center p-1" type="button"><span class="material-symbols-outlined text-[20px]" data-icon="visibility">visibility</span></button></div>
+<!-- Validation hint -->
+<p class="mt-2 text-[12px] font-normal text-[#94A3B8]">密码至少 6 位</p>
+</div>
+<!-- Actions Row -->
+<div class="flex items-center justify-between mt-4">
+<div class="flex items-center">
+<input class="h-4 w-4 rounded border-graphite-border text-primary-container focus:ring-primary-container/15 cursor-pointer" id="remember-me" name="remember-me" type="checkbox"/>
+<label class="block text-[12px] font-medium text-[#64748B] mb-2 tracking-[0.05em]" for="remember-me">
+              记住我
+            </label>
+</div>
+<a class="font-body-md text-body-md text-primary-container hover:text-primary-container/80 transition-colors" href="#">
+            忘记密码？
+          </a>
+</div>
+<!-- Login Button -->
+<button class="w-full h-[48px] bg-[#0F766E] text-white rounded-lg font-bold text-title-md hover:bg-[#0F766E]/90 focus:outline-none focus:ring-2 focus:ring-[#0F766E]/15 focus:ring-offset-2 transition-all mt-6 shadow-[0_1px_2px_rgba(15,118,110,0.1),0_4px_12px_rgba(15,118,110,0.08)]" type="submit">
+          登 录
+        </button>
+</form>
+<!-- Footnote -->
+<div class="mt-8 text-center"><div class="border-t border-[#F1F5F9] mb-8"></div>
+<p class="text-[12px] font-normal text-[#94A3B8]">
+          仅限公司内部员工使用 · 问题求助联系 IT 服务台
+        </p>
+</div>
+</div>
+</div>
+</body></html>

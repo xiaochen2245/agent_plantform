@@ -1,0 +1,15 @@
+{
+  "project": {
+    "id": "18205192342207537492",
+    "name": "projects/18205192342207537492",
+    "title": "Agent 平台 · 企业内部 AI 门户",
+    "designSystem": { "assetId": "6711459bcd364fb59f558af1a8dc5473", "source": "DESIGN.md 方向A 墨青" }
+  },
+  "screens": [
+    { "slug": "login-agent-portal-v3", "title": "登录 · 手工精修 v3", "file": ".stitch/designs/login-agent-portal-v3.html", "origin": "handcrafted", "note": "v1/v2 为 Stitch 生成，v3 手工精修（Noto Sans SC + logomark + 编辑级排版）" },
+    { "slug": "workflow-canvas", "title": "工作流编排画布", "file": ".stitch/designs/workflow-canvas.html", "origin": "handcrafted", "note": "节点面板+画布（知识检索→LLM→条件分支示例流）+右侧节点配置+运行日志" },
+    { "slug": "agent-workbench", "title": "Agent 工作台（含创建向导 1/4）", "file": ".stitch/designs/agent-workbench.html", "origin": "handcrafted", "note": "侧栏=全站页面地图（编辑/员工/管理三区）；Agent 卡片列表+新建弹窗三类型选择" }
+  ],
+  "pending": ["对话主界面", "历史会话", "用户与授权(管理)", "知识库", "变体主题×2"],
+  "notes": "Stitch generate/edit 端点间歇不可用时，采用本地手工构建 + batchCreate 上传的管线"
+}

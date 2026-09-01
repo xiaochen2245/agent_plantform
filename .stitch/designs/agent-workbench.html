@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Agent 平台 - Agent 工作台</title>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&amp;family=Inter:wght@400;500;600&amp;family=Noto+Sans+SC:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,300,0..1,0" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+<style>
+  body { font-family:'Inter','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif; }
+  .font-display { font-family:'Montserrat','Noto Sans SC',sans-serif; }
+  .material-symbols-outlined { font-variation-settings:'FILL' 0,'wght' 400,'GRAD' 0,'opsz' 24; font-size:20px; }
+  .nav-item { display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:10px; font-size:13.5px; font-medium; color:#475569; transition:all .15s; }
+  .nav-item:hover { background:#F1F5F9; color:#0F172A; }
+  .nav-item.active { background:#0F766E; color:#fff; font-weight:600; box-shadow:0 4px 12px -4px rgba(15,118,110,.4); }
+  .nav-item.active .material-symbols-outlined { color:#fff; }
+  .type-card { border:1.5px solid #E2E8F0; border-radius:16px; padding:20px; cursor:pointer; transition:all .15s; }
+  .type-card:hover { border-color:#0F766E; box-shadow:0 8px 24px -8px rgba(15,118,110,.18); }
+  .type-card.picked { border-color:#0F766E; background:#0F766E/[.04]; box-shadow:0 0 0 3px rgba(15,118,110,.12); }
+  .agent-card { background:#fff; border-radius:16px; box-shadow:0 0 0 1px rgba(15,23,42,.05),0 8px 24px -10px rgba(15,23,42,.08); padding:20px; transition:all .15s; }
+  .agent-card:hover { transform:translateY(-2px); box-shadow:0 0 0 1px rgba(15,118,110,.15),0 16px 32px -12px rgba(15,23,42,.12); }
+</style>
+</head>
+<body class="h-screen w-screen overflow-hidden bg-[#F8FAFC] text-[#0F172A] antialiased selection:bg-[#0F766E] selection:text-white flex">
+
+<!-- ══ Sidebar: 全站页面地图 ══ -->
+<aside class="w-[228px] bg-white border-r border-[#E2E8F0] flex flex-col shrink-0">
+  <div class="px-4 h-14 flex items-center gap-3 border-b border-[#F1F5F9]">
+    <div class="w-8 h-8 rounded-[10px] bg-[#0F766E] flex items-center justify-center shadow-[0_4px_10px_-2px_rgba(15,118,110,.40)]">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" fill="#fff"/><circle cx="12" cy="12" r="8" stroke="#fff" stroke-opacity=".55" stroke-width="1.4"/></svg>
+    </div>
+    <div>
+      <div class="font-display text-[14px] font-bold leading-none">Agent 平台</div>
+      <div class="mt-1 text-[9px] font-semibold tracking-[0.16em] text-[#94A3B8]">AI&nbsp;WORKSPACE</div>
+    </div>
+  </div>
+
+  <nav class="flex-1 overflow-y-auto p-3 space-y-5">
+    <div>
+      <div class="px-2.5 py-1.5 text-[10.5px] font-semibold tracking-[0.1em] text-[#94A3B8]">编 辑</div>
+      <a class="nav-item active"><span class="material-symbols-outlined text-[19px]">grid_view</span>Agent 工作台</a>
+      <a class="nav-item"><span class="material-symbols-outlined text-[19px]">account_tree</span>工作流编排</a>
+      <a class="nav-item"><span class="material-symbols-outlined text-[19px]">folder_managed</span>知识库</a>
+    </div>
+    <div>
+      <div class="px-2.5 py-1.5 text-[10.5px] font-semibold tracking-[0.1em] text-[#94A3B8]">员 工 端</div>
+      <a class="nav-item"><span class="material-symbols-outlined text-[19px]">forum</span>对话</a>
+      <a class="nav-item"><span class="material-symbols-outlined text-[19px]">history</span>历史会话</a>
+    </div>
+    <div>
+      <div class="px-2.5 py-1.5 text-[10.5px] font-semibold tracking-[0.1em] text-[#94A3B8]">管 理</div>
+      <a class="nav-item"><span class="material-symbols-outlined text-[19px]">manage_accounts</span>用户与授权</a>
+      <a class="nav-item"><span class="material-symbols-outlined text-[19px]">monitoring</span>用量与审计</a>
+    </div>
+  </nav>
+
+  <div class="p-3 border-t border-[#F1F5F9] flex items-center gap-2.5">
+    <div class="w-8 h-8 rounded-full bg-[#0F766E]/10 text-[#0F766E] flex items-center justify-center text-[12px] font-bold">张</div>
+    <div class="flex-1">
+      <div class="text-[12.5px] font-semibold leading-tight">张明</div>
+      <div class="text-[10.5px] text-[#94A3B8]">平台管理员</div>
+    </div>
+    <button class="p-1.5 rounded-lg text-[#94A3B8] hover:text-[#0F172A] hover:bg-[#F1F5F9] transition-colors"><span class="material-symbols-outlined text-[17px]">logout</span></button>
+  </div>
+</aside>
+
+<!-- ══ Main ══ -->
+<main class="flex-1 flex flex-col min-w-0">
+  <header class="h-14 bg-white/80 backdrop-blur border-b border-[#E2E8F0] flex items-center gap-3 px-6 shrink-0">
+    <h1 class="font-display text-[16px] font-bold tracking-[-0.01em]">Agent 工作台</h1>
+    <span class="text-[12px] text-[#94A3B8]">创建、编排与发布企业 Agent</span>
+    <div class="flex-1"></div>
+    <div class="relative">
+      <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-[#94A3B8]">search</span>
+      <input placeholder="搜索 Agent" class="w-64 h-9 pl-10 pr-3 rounded-[10px] border border-[#E2E8F0] bg-[#F8FAFC] text-[13px] placeholder:text-[#B6C2CF] focus:outline-none focus:border-[#0F766E] focus:ring-[3px] focus:ring-[#0F766E]/[.12] focus:bg-white transition-all"/>
+    </div>
+  </header>
+
+  <div class="flex-1 overflow-y-auto p-6">
+    <!-- filter row -->
+    <div class="flex items-center gap-2 mb-5">
+      <button class="h-8 px-3.5 rounded-full bg-[#0F766E] text-white text-[12.5px] font-semibold">全部 <span class="opacity-70 tabular-nums">6</span></button>
+      <button class="h-8 px-3.5 rounded-full border border-[#E2E8F0] bg-white text-[12.5px] font-medium text-[#475569] hover:border-[#0F766E]/40 transition-colors">聊天助手 <span class="text-[#94A3B8] tabular-nums">3</span></button>
+      <button class="h-8 px-3.5 rounded-full border border-[#E2E8F0] bg-white text-[12.5px] font-medium text-[#475569] hover:border-[#0F766E]/40 transition-colors">Agent <span class="text-[#94A3B8] tabular-nums">2</span></button>
+      <button class="h-8 px-3.5 rounded-full border border-[#E2E8F0] bg-white text-[12.5px] font-medium text-[#475569] hover:border-[#0F766E]/40 transition-colors">工作流 <span class="text-[#94A3B8] tabular-nums">1</span></button>
+      <div class="flex-1"></div>
+      <button class="h-9 px-4 rounded-[10px] bg-[#0F766E] text-white text-[13px] font-semibold hover:bg-[#0d6a63] transition-colors shadow-[0_1px_2px_rgba(15,23,42,.06),0_4px_10px_-2px_rgba(15,118,110,.35)] flex items-center gap-1.5">
+        <span class="material-symbols-outlined text-[17px]">add</span>新建 Agent
+      </button>
+    </div>
+
+    <!-- agent grid -->
+    <div class="grid grid-cols-2 xl:grid-cols-3 gap-4">
+      <!-- card 1 -->
+      <div class="agent-card">
+        <div class="flex items-start justify-between mb-3">
+          <div class="w-10 h-10 rounded-xl bg-[#0F766E]/[.08] flex items-center justify-center"><span class="material-symbols-outlined text-[21px] text-[#0F766E]">dns</span></div>
+          <span class="px-2 py-0.5 rounded-md bg-[#0F766E]/[.08] text-[#0F766E] text-[10.5px] font-semibold">聊天助手</span>
+        </div>
+        <div class="text-[14.5px] font-bold mb-1">IT 运维助手</div>
+        <p class="text-[12px] text-[#94A3B8] leading-[1.6] mb-4">解答服务器、网络与账号问题，基于运维知识库检索作答</p>
+        <div class="flex items-center gap-2 text-[11px] text-[#94A3B8] pt-3 border-t border-[#F1F5F9]">
+          <span class="w-1.5 h-1.5 rounded-full bg-[#14B8A6]"></span>已发布
+          <span class="mx-1">·</span>授权 128 人
+          <span class="mx-1">·</span>2 小时前更新
+          <button class="ml-auto text-[#94A3B8] hover:text-[#0F172A] transition-colors"><span class="material-symbols-outlined text-[17px]">more_horiz</span></button>
+        </div>
+      </div>
+      <!-- card 2 -->
+      <div class="agent-card">
+        <div class="flex items-start justify-between mb-3">
+          <div class="w-10 h-10 rounded-xl bg-[#7C3AED]/[.08] flex items-center justify-center"><span class="material-symbols-outlined text-[21px] text-[#7C3AED]">receipt_long</span></div>
+          <span class="px-2 py-0.5 rounded-md bg-[#7C3AED]/[.08] text-[#7C3AED] text-[10.5px] font-semibold">工作流</span>
+        </div>
+        <div class="text-[14.5px] font-bold mb-1">报销政策问答</div>
+        <p class="text-[12px] text-[#94A3B8] leading-[1.6] mb-4">检索制度文档 → LLM 组织答案 → 必要时查询 OA 审批状态</p>
+        <div class="flex items-center gap-2 text-[11px] text-[#94A3B8] pt-3 border-t border-[#F1F5F9]">
+          <span class="w-1.5 h-1.5 rounded-full bg-[#14B8A6]"></span>已发布
+          <span class="mx-1">·</span>授权 86 人
+          <span class="mx-1">·</span>昨天更新
+          <button class="ml-auto text-[#94A3B8] hover:text-[#0F172A] transition-colors"><span class="material-symbols-outlined text-[17px]">more_horiz</span></button>
+        </div>
+      </div>
+      <!-- card 3 -->
+      <div class="agent-card">
+        <div class="flex items-start justify-between mb-3">
+          <div class="w-10 h-10 rounded-xl bg-[#D97706]/[.10] flex items-center justify-center"><span class="material-symbols-outlined text-[21px] text-[#D97706]">terminal</span></div>
+          <span class="px-2 py-0.5 rounded-md bg-[#D97706]/[.10] text-[#D97706] text-[10.5px] font-semibold">Agent</span>
+        </div>
+        <div class="text-[14.5px] font-bold mb-1">代码评审助手</div>
+        <p class="text-[12px] text-[#94A3B8] leading-[1.6] mb-4">自主读取 MR diff，调用静态检查工具，输出分级评审意见</p>
+        <div class="flex items-center gap-2 text-[11px] text-[#94A3B8] pt-3 border-t border-[#F1F5F9]">
+          <span class="w-1.5 h-1.5 rounded-full bg-[#14B8A6]"></span>已发布
+          <span class="mx-1">·</span>授权 42 人
+          <span class="mx-1">·</span>3 天前更新
+          <button class="ml-auto text-[#94A3B8] hover:text-[#0F172A] transition-colors"><span class="material-symbols-outlined text-[17px]">more_horiz</span></button>
+        </div>
+      </div>
+      <!-- card 4 draft -->
+      <div class="agent-card opacity-[.92]">
+        <div class="flex items-start justify-between mb-3">
+          <div class="w-10 h-10 rounded-xl bg-[#64748B]/[.10] flex items-center justify-center"><span class="material-symbols-outlined text-[21px] text-[#64748B]">description</span></div>
+          <span class="px-2 py-0.5 rounded-md bg-[#F1F5F9] text-[#64748B] text-[10.5px] font-semibold">聊天助手</span>
+        </div>
+        <div class="text-[14.5px] font-bold mb-1">产品文档查询 <span class="text-[10px] font-semibold text-[#D97706] bg-[#D97706]/10 px-1.5 py-0.5 rounded align-middle">草稿</span></div>
+        <p class="text-[12px] text-[#94A3B8] leading-[1.6] mb-4">面向产品团队的文档问答，知识库构建中（142/300 篇）</p>
+        <div class="flex items-center gap-2 text-[11px] text-[#94A3B8] pt-3 border-t border-[#F1F5F9]">
+          <span class="w-1.5 h-1.5 rounded-full bg-[#CBD5E1]"></span>未发布
+          <span class="mx-1">·</span>未授权
+          <span class="mx-1">·</span>5 天前编辑
+          <button class="ml-auto text-[#94A3B8] hover:text-[#0F172A] transition-colors"><span class="material-symbols-outlined text-[17px]">more_horiz</span></button>
+        </div>
+      </div>
+      <!-- create tile -->
+      <button class="rounded-16 border-1.5 border-dashed border-[#CBD5E1] rounded-[16px] min-h-[168px] flex flex-col items-center justify-center gap-2 text-[#94A3B8] hover:border-[#0F766E] hover:text-[#0F766E] hover:bg-[#0F766E]/[.03] transition-all">
+        <span class="material-symbols-outlined text-[26px]">add_circle</span>
+        <span class="text-[13px] font-semibold">新建 Agent</span>
+        <span class="text-[11px]">聊天助手 / Agent / 工作流</span>
+      </button>
+    </div>
+  </div>
+</main>
+
+<!-- ══ Modal: 创建 Agent · 步骤 1/4 ══ -->
+<div class="fixed inset-0 z-50 flex items-center justify-center">
+  <div class="absolute inset-0 bg-[#0F172A]/[.45] backdrop-blur-[2px]"></div>
+  <div class="relative w-[640px] max-w-[92vw] bg-white rounded-2xl shadow-[0_24px_80px -16px_rgba(15,23,42,.35)] overflow-hidden">
+    <div class="px-8 pt-7 pb-5">
+      <div class="flex items-center justify-between mb-1.5">
+        <h2 class="font-display text-[19px] font-bold tracking-[-0.01em]">创建 Agent</h2>
+        <button class="p-1.5 rounded-lg text-[#94A3B8] hover:text-[#0F172A] hover:bg-[#F1F5F9] transition-colors"><span class="material-symbols-outlined text-[19px]">close</span></button>
+      </div>
+      <p class="text-[12.5px] text-[#94A3B8] mb-5">选择一种类型开始 —— 决定能力模型与编排方式，后续可升级</p>
+      <!-- stepper -->
+      <div class="flex items-center gap-2 mb-6">
+        <div class="flex items-center gap-1.5 text-[#0F766E]"><span class="w-5 h-5 rounded-full bg-[#0F766E] text-white text-[11px] font-bold flex items-center justify-center">1</span><span class="text-[12px] font-semibold">选择类型</span></div>
+        <div class="w-7 h-px bg-[#E2E8F0]"></div>
+        <div class="flex items-center gap-1.5 text-[#94A3B8]"><span class="w-5 h-5 rounded-full bg-[#F1F5F9] text-[#94A3B8] text-[11px] font-bold flex items-center justify-center">2</span><span class="text-[12px] font-medium">基础信息</span></div>
+        <div class="w-7 h-px bg-[#E2E8F0]"></div>
+        <div class="flex items-center gap-1.5 text-[#94A3B8]"><span class="w-5 h-5 rounded-full bg-[#F1F5F9] text-[#94A3B8] text-[11px] font-bold flex items-center justify-center">3</span><span class="text-[12px] font-medium">能力配置</span></div>
+        <div class="w-7 h-px bg-[#E2E8F0]"></div>
+        <div class="flex items-center gap-1.5 text-[#94A3B8]"><span class="w-5 h-5 rounded-full bg-[#F1F5F9] text-[#94A3B8] text-[11px] font-bold flex items-center justify-center">4</span><span class="text-[12px] font-medium">发布授权</span></div>
+      </div>
+
+      <div class="grid grid-cols-3 gap-3.5">
+        <div class="type-card">
+          <span class="material-symbols-outlined text-[24px] text-[#0F766E] mb-3 block">chat</span>
+          <div class="text-[14px] font-bold mb-1.5">聊天助手</div>
+          <p class="text-[11.5px] text-[#94A3B8] leading-[1.65]">绑定知识库的问答对话，适合制度、文档类场景，开箱即用</p>
+          <div class="mt-3 text-[10.5px] font-semibold text-[#0F766E]">RAG · 多轮对话</div>
+        </div>
+        <div class="type-card picked relative">
+          <span class="material-symbols-outlined text-[24px] text-[#D97706] mb-3 block">smart_toy</span>
+          <div class="text-[14px] font-bold mb-1.5">Agent</div>
+          <p class="text-[11.5px] text-[#94A3B8] leading-[1.65]">自主推理与规划，可调用工具与代码执行，适合多步任务</p>
+          <div class="mt-3 text-[10.5px] font-semibold text-[#D97706]">推理 · 工具调用</div>
+          <span class="absolute top-3.5 right-3.5 material-symbols-outlined text-[18px] text-[#0F766E]" style="font-variation-settings:'FILL' 1,'wght' 400">check_circle</span>
+        </div>
+        <div class="type-card">
+          <span class="material-symbols-outlined text-[24px] text-[#7C3AED] mb-3 block">account_tree</span>
+          <div class="text-[14px] font-bold mb-1.5">工作流</div>
+          <p class="text-[11.5px] text-[#94A3B8] leading-[1.65]">可视化节点编排，确定性流程与分支控制，适合固定业务链路</p>
+          <div class="mt-3 text-[10.5px] font-semibold text-[#7C3AED]">画布编排 · 分支逻辑</div>
+        </div>
+      </div>
+    </div>
+    <div class="px-8 py-4 bg-[#F8FAFC] border-t border-[#F1F5F9] flex items-center justify-end gap-2.5">
+      <button class="h-9 px-4 rounded-[10px] border border-[#E2E8F0] bg-white text-[13px] font-semibold text-[#475569] hover:bg-[#F1F5F9] transition-colors">取消</button>
+      <button class="h-9 px-5 rounded-[10px] bg-[#0F766E] text-white text-[13px] font-semibold hover:bg-[#0d6a63] transition-colors shadow-[0_4px_10px_-2px_rgba(15,118,110,.35)]">下一步 · 基础信息</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,31 @@
+# secrets / local config
+.mcp.json
+.env
+.env.local
+
+# lock files
+*.#
+.~lock.*
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# node
+node_modules/
+dist/
+.vite/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# uploads (dev)
+backend/uploads/
+backend/storage/

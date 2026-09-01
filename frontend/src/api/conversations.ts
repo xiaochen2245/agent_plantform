@@ -1,0 +1,27 @@
+import { http } from "./http";
+import type { ConversationSummary, UploadedFile } from "../types";
+
+/** 会话详情消息（回放用）。
+ * 契约 v2：GET /api/conversations/{id}/messages → {"messages":[...]}（按 created_at asc）。
+ * 契约 v4：user 消息可携带 files 元数据（可空）。
+ */
+
+export interface ConversationMessage {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+  files?: UploadedFile[] | null;
+  /** 契约 v6：思考过程（无思考为 null） */
+  reasoning?: string | null;
+}
+
+export async function fetchConversations(appId: number): Promise<ConversationSummary[]> {
+  const data = (await http.get<{ items: ConversationSummary[] }>("/conversations", { params: { app_id: appId } })).data;
+  return data.items ?? [];
+}
+
+export async function fetchConversationMessages(conversationId: string): Promise<ConversationMessage[]> {
+  const data = (await http.get<{ messages: ConversationMessage[] }>(`/conversations/${conversationId}/messages`)).data;
+  return data.messages ?? [];
+}

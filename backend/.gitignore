@@ -1,0 +1,3 @@
+# 切片内补充（根 .gitignore 已覆盖 .venv/__pycache__ 等）
+dev.db
+dev.db-journal

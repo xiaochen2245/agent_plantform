@@ -105,3 +105,18 @@
 ## agent_done 事件携带会话 id
 - `event: agent_done` → `data: {"conversation_id":"<我方内部 UUID>"}`（原先恒为 {}）
 - 语义：前端首轮发送（conversation_id 传空串）后，凭此 id 认领会话；前端**不得**自行生成会话 id
+
+---
+
+# v6 增补（wave7 · orchestrator 批准 · 思考过程透传）
+
+## 流式新事件：reasoning（条件出现）
+- `event: reasoning` → `data: {"content":"<增量思考文本>"}`
+- 仅当上游模型返回思考内容时出现；普通回复流中完全缺失（前端零打扰）
+- 后端兼容多种上游形态（自动探测）：message 事件携带 `reasoning_content`/`reasoning`/`thought` 字段，或独立 `agent_thought` 事件
+
+## 消息持久化
+- messages 详情端点的 message 新增 `"reasoning": string | null`（无思考为 null）
+
+## 前端展示语义
+- 思考面板：可折叠「思考过程」；生成中且尚无正文时默认展开，正文开始/流结束后默认收起；历史回放默认收起

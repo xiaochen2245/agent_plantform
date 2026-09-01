@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     APP_NAME: str = "Agent Platform"
     # dev 默认开启：cookie secure=False、CORS 放开、CSRF 白名单自动含 5173。生产必须显式覆盖。
     DEBUG: bool = True
+    # HTTP 部署阶段（TLS 未就绪）可显式设 COOKIE_SECURE=false；缺省跟随 DEBUG
+    COOKIE_SECURE: bool | None = None
+
+    @property
+    def cookie_secure(self) -> bool:
+        return self.COOKIE_SECURE if self.COOKIE_SECURE is not None else not self.DEBUG
 
     JWT_SECRET: str = "dev-only-jwt-secret-change-me-in-production-32b"
     JWT_ALGORITHM: str = "HS256"

@@ -22,8 +22,8 @@ REFRESH_COOKIE = "refresh_token_cookie"
 
 
 def _cookie_kwargs() -> dict:
-    # dev(HTTP) 下 secure=False；生产 DEBUG=false 自动收紧
-    return {"httponly": True, "samesite": "strict", "secure": not settings.DEBUG, "path": "/"}
+    # secure 跟随 COOKIE_SECURE（缺省=not DEBUG）：纯 HTTP 内网部署阶段可关
+    return {"httponly": True, "samesite": "strict", "secure": settings.cookie_secure, "path": "/"}
 
 
 def _set_auth_cookies(response: Response, access: str, raw_refresh: str) -> None:

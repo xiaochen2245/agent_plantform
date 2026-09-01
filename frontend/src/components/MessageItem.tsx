@@ -1,6 +1,8 @@
 import { FileImageOutlined, FileMarkdownOutlined, FilePdfOutlined, FileTextOutlined, FileWordOutlined, LockFilled, PaperClipOutlined, WarningFilled } from "@ant-design/icons";
 import { Button } from "antd";
+import Markdown from "./Markdown";
 import { fileKindOf, formatFileSize } from "../utils/files";
+import "../styles/markdown.css";
 import type { ChatMessage, UploadedFile } from "../types";
 
 interface MessageItemProps {
@@ -73,7 +75,11 @@ export default function MessageItem({ message, onRetry, streaming }: MessageItem
 
   return (
     <div className="msg-assistant">
-      {message.content}
+      {message.content ? (
+        <Markdown content={message.content} />
+      ) : (
+        <span className="placeholder">…</span>
+      )}
       {message.status === "streaming" && streaming && (
         <span className="stream-cursor" aria-label="生成中" />
       )}

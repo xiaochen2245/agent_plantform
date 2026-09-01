@@ -6,17 +6,44 @@ import type { AppInfo, ConversationSummary, MeInfo } from "../types";
  * 覆盖：auth / apps / conversations（含 v2 消息详情）/ chat 流式。
  * admin 端点（契约 v2）已由真实后端提供，mock 不再覆盖 —— 管理页相关测试
  * 在测试内自建 handlers（见 pages/Admin.test.tsx）。
- * 种子账号：admin@company.com / admin123
+ * 种子账号：admin@company.com / admin123（管理员）；user@company.com / user123（普通员工，e2e 守卫用例）
  */
 
 const MOCK_JWT = "mock-access-token";
 const MOCK_REFRESH = "mock-refresh-token";
 
-const ME: MeInfo = {
+/**
+ * mock 会话标记（localStorage）：MSW v2 的 handler 跑在页面上下文，
+ * SW 返回的 Set-Cookie 不落 document.cookie jar，模块状态又随整页重载丢失。
+ * 因此登录态落在 localStorage（跨重载持久；Playwright 每 context 独立隔离）。
+ */
+const SESSION_KEY = "mock_session";
+
+function currentMockUser(): MeInfo | null {
+  try {
+    const email = globalThis.localStorage?.getItem(SESSION_KEY);
+    if (email === ME_ADMIN.email) return ME_ADMIN;
+    if (email === ME_USER.email) return ME_USER;
+  } catch {
+    // 无 localStorage 的边缘环境（非浏览器）忽略，退回 cookie 判定
+  }
+  return null;
+}
+
+const ME_ADMIN: MeInfo = {
   id: 1,
   email: "admin@company.com",
   name: "张明",
   roles: ["USER", "PLATFORM_ADMIN"],
+  dept_id: null,
+};
+
+/** 普通员工账号：e2e 管理守卫用例（非 PLATFORM_ADMIN 访问 /admin 被弹回）。 */
+const ME_USER: MeInfo = {
+  id: 2,
+  email: "user@company.com",
+  name: "李雷",
+  roles: ["USER"],
   dept_id: null,
 };
 
@@ -96,25 +123,26 @@ export const handlers = [
   mswHttp.post("/api/auth/login", async ({ request }) => {
     const body = (await request.json()) as { email?: string; password?: string };
     if (body.email === "admin@company.com" && body.password === "admin123") {
-      return new HttpResponse(null, {
-        status: 200,
-        headers: authCookiePairs(),
-      });
+      globalThis.localStorage?.setItem(SESSION_KEY, body.email);
+      return new HttpResponse(null, { status: 200, headers: authCookiePairs() });
     }
+    if (body.email === "user@company.com" && body.password === "user123") {
+      globalThis.localStorage?.setItem(SESSION_KEY, body.email);
+      return new HttpResponse(null, { status: 200, headers: authCookiePairs() });
+    }
+    globalThis.localStorage?.removeItem(SESSION_KEY);
     return HttpResponse.json({ detail: "Invalid credentials" }, { status: 401 });
   }),
 
   mswHttp.post("/api/auth/refresh", ({ request }) => {
-    if (hasCookie(request, "refresh_token_cookie")) {
-      return new HttpResponse(null, {
-        status: 200,
-        headers: authCookiePairs(),
-      });
+    if (currentMockUser() || hasCookie(request, "refresh_token_cookie")) {
+      return new HttpResponse(null, { status: 200, headers: authCookiePairs() });
     }
     return HttpResponse.json({ detail: "Invalid refresh token" }, { status: 401 });
   }),
 
   mswHttp.post("/api/auth/logout", () => {
+    globalThis.localStorage?.removeItem(SESSION_KEY);
     return new HttpResponse(null, {
       status: 200,
       headers: [
@@ -125,9 +153,9 @@ export const handlers = [
   }),
 
   mswHttp.get("/api/auth/me", ({ request }) => {
-    if (hasCookie(request, "access_token_cookie")) {
-      return HttpResponse.json(ME);
-    }
+    const sessionUser = currentMockUser();
+    if (sessionUser) return HttpResponse.json(sessionUser);
+    if (hasCookie(request, "access_token_cookie")) return HttpResponse.json(ME_ADMIN);
     return HttpResponse.json({ detail: "Not authenticated" }, { status: 401 });
   }),
 

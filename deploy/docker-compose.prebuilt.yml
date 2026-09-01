@@ -1,0 +1,65 @@
+# Agent Platform — prebuilt-image orchestration (server-side, .226)
+# Usage (on server): TAG=latest docker compose -f docker-compose.yml up -d
+# Diff vs docker-compose.yml: backend/frontend reference shipped images
+# (docker save | ssh docker load via scripts/build-ship.sh) instead of
+# building from source. Server never needs git/npm/pip network access.
+#
+# Deployed by scripts/remote-up.sh to /root/agent-platform/docker-compose.yml
+# alongside .env (secrets generated server-side by scripts/remote-env.sh).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ap-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-agent_platform}
+      POSTGRES_USER: ${POSTGRES_USER:-agent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agent_dev_only}
+    # No host port: backend reaches postgres via the compose network.
+    # Avoids clashing with Dify's own Postgres on the server.
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agent} -d ${POSTGRES_DB:-agent_platform}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    image: agent-platform-backend:${TAG:-latest}
+    container_name: ap-backend
+    env_file:
+      - path: .env
+        required: false   # keep `docker compose config` usable without .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:-agent_dev_only}@postgres:5432/${POSTGRES_DB:-agent_platform}
+    expose:
+      - "8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:8000/api/health')\" || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  frontend:
+    image: agent-platform-frontend:${TAG:-latest}
+    container_name: ap-frontend
+    # Coexist with Dify on the same host: Dify keeps :80/:3000/:443,
+    # our portal listens on PORTAL_PORT (default 8080, set in server .env)
+    ports:
+      - "${PORTAL_PORT:-8080}:80"
+    volumes:
+      - ./nginx/conf.d/portal.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

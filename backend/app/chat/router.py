@@ -6,6 +6,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import current_user
+from app.authz import is_authorized
 from app.chat.service import stream_dify_events
 from app.db.session import get_db
 from app.dify.deps import get_dify
@@ -29,6 +30,10 @@ async def send_message(
     app_row = await db.get(App, body.app_id)
     if app_row is None or app_row.status != 1:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "App not found")
+
+    # 授权前置校验（契约 v2：未授权 403，防绕过前端）
+    if not await is_authorized(db, user, app_row.id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not authorized for this app")
 
     if body.conversation_id:
         try:

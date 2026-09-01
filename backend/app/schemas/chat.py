@@ -28,3 +28,14 @@ class ConversationOut(BaseModel):
 
 class ConversationsResponse(BaseModel):
     items: list[ConversationOut]
+
+
+class MessageOut(BaseModel):
+    id: int
+    role: str  # 'user' | 'assistant'
+    content: str
+    created_at: str
+
+
+class MessagesResponse(BaseModel):
+    messages: list[MessageOut]

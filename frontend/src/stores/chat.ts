@@ -163,8 +163,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           patchAssistant({ content: (m?.content ?? "") + delta });
         },
         onMessageEnd: (usage) => patchAssistant({ usage }),
-        onError: (message) => {
-          patchAssistant({ status: "error", content: message });
+        onError: (message, kind) => {
+          patchAssistant({ status: "error", content: message, errorKind: kind });
         },
         onAgentDone: () => {
           patchAssistant({ status: "done" });
@@ -174,7 +174,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       abortController.signal
     ).catch(() => {
       // 网络/中断异常兜底：标记错误态并收尾
-      patchAssistant({ status: "error", content: "连接中断，请重试" });
+      patchAssistant({ status: "error", content: "连接中断，请重试", errorKind: "generic" });
       finish();
     });
     if (get().streaming) finish(); // 流自然结束但未见 agent_done 的兜底

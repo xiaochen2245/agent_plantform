@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { createSSEParser, parseSSEEvent, type SSEEvent } from "./sse";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createSSEParser, parseSSEEvent, sendChatStream, type SSEEvent } from "./sse";
 
 describe("createSSEParser", () => {
   it("按 \\n\\n 切帧并解析 event/data", () => {
@@ -74,5 +74,46 @@ describe("parseSSEEvent", () => {
       event: "message",
       data: {},
     });
+  });
+});
+
+describe("sendChatStream 错误分类", () => {
+  const originalFetch = globalThis.fetch;
+
+  function stubFetch(status: number, body: unknown) {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { "Content-Type": "application/json" },
+      })) as typeof fetch;
+  }
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it("HTTP 403 → onError 携带 unauthorized 分类（detail 透传）", async () => {
+    stubFetch(403, { detail: "Not authorized for this app" });
+    const onError = vi.fn();
+    await sendChatStream({ app_id: 1, query: "hi", conversation_id: "" }, {
+      onMessage: () => undefined,
+      onMessageEnd: () => undefined,
+      onError,
+      onAgentDone: () => undefined,
+    });
+    expect(onError).toHaveBeenCalledWith("Not authorized for this app", "unauthorized");
+  });
+
+  it("HTTP 500 → onError 携带 generic 分类", async () => {
+    stubFetch(500, { detail: "Internal error" });
+    const onError = vi.fn();
+    await sendChatStream({ app_id: 1, query: "hi", conversation_id: "" }, {
+      onMessage: () => undefined,
+      onMessageEnd: () => undefined,
+      onError,
+      onAgentDone: () => undefined,
+    });
+    expect(onError).toHaveBeenCalledWith("Internal error", "generic");
   });
 });

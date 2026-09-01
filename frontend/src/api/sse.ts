@@ -1,4 +1,4 @@
-import type { ChatSendRequest, ChatSSEEvent } from "../types";
+import type { ChatSendRequest, ChatSSEEvent, MessageErrorKind } from "../types";
 
 export interface SSEEvent {
   event: string;
@@ -77,7 +77,7 @@ export function parseSSEEvent(e: SSEEvent): ChatSSEEvent | null {
 export interface SendChatHandlers {
   onMessage: (delta: string) => void;
   onMessageEnd: (usage: { total: number }) => void;
-  onError: (message: string) => void;
+  onError: (message: string, kind?: MessageErrorKind) => void;
   onAgentDone: () => void;
 }
 
@@ -105,7 +105,8 @@ export async function sendChatStream(
     } catch {
       /* 非 JSON 错误体，用默认文案 */
     }
-    handlers.onError(detail);
+    // 契约 v2：未授权 App 调用返回 403 {"detail":"Not authorized for this app"}，重试无意义
+    handlers.onError(detail, resp.status === 403 ? "unauthorized" : "generic");
     return;
   }
 

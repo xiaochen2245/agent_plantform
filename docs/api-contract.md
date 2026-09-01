@@ -58,3 +58,24 @@
 - 可见 = 用户直授 ∪ 所属部门 ∪ 拥有角色；无任何授权的 App 不可见、chat/send 调用 403 `{"detail":"Not authorized for this app"}`
 - 种子：三个 App 默认授给角色 `USER`（全员可见，保持现有体验）；admin（PLATFORM_ADMIN）不受限
 - 支撑表：roles(id,code,name)+user_roles、departments(id,name,parent_id,path)、app_authorizations(app_id,principal_type['user'|'dept'|'role'],principal_id)
+
+---
+
+# v3 增补（wave4 · orchestrator 批准 · 工作流模式）
+
+## AppOut 扩展
+- 新增 `mode:"workflow"` 应用 + `inputs_schema` 字段（可空数组）：
+  `"inputs_schema":[{"name":"business_card","label":"名片内容","type":"paragraph","required":true}]`（type: text|paragraph）
+- 种子新增 app 4：`{"id":4,"name":"名片生成助手","description":"输入名片信息，生成排版名片","mode":"workflow","inputs_schema":[如上]}`
+
+## chat/send 扩展（请求体）
+- `"inputs": {"<变量名>":"<值>"}`（可选对象；workflow 模式应用按 inputs_schema 校验，缺必填 → 400 `{"detail":"missing required input: <name>"}`）
+
+## chat/send 行为（workflow 模式）
+- 后端调 Dify `POST /v1/workflows/run`（response_mode=streaming），**事件翻译为统一对话词汇表**后再透传，前端无感知：
+  - `workflow_started` / `node_started` / `node_finished` / `ping` → 丢弃（不透传）
+  - `text_chunk`（data.text）→ `message`（answer=data.text）
+  - `workflow_finished` → `message_end`（metadata.usage.total_tokens=data.total_tokens）
+  - 上游 error → `error`（契约形状）
+  - 结束仍追加自有 `agent_done`
+- workflow 模式无 Dify 会话概念：dify_conversation_id 置空；我方 conversation 照常创建/复用（title 取首个 inputs 值或 query 前 20 字）

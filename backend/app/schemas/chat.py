@@ -16,7 +16,9 @@ class AppsResponse(BaseModel):
 
 class ChatSendRequest(BaseModel):
     app_id: int
-    query: str = Field(min_length=1, max_length=8000)
+    # 契约 v3：query 对 workflow 应用非必需（inputs 承载输入）；对 chat/agent 必填由 handler 判定
+    query: str | None = Field(default=None, max_length=8000)
+    inputs: dict[str, str] | None = None
     conversation_id: str | None = ""  # 内部 UUID；空串=新建
     inputs: dict[str, str] | None = None  # 契约 v3：workflow 应用变量透传
 

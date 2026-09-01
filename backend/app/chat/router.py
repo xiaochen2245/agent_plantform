@@ -1,4 +1,5 @@
 """Chat 路由：POST /api/chat/send（SSE 透传代理；v3 增工作流模式分支）。"""
+import json
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -58,6 +59,9 @@ async def send_message(
     inputs = dict(body.inputs or {})
     if is_workflow:
         _validate_workflow_inputs(app_row.inputs_schema or [], inputs)
+    elif not (body.query and body.query.strip()):
+        # 契约 v3：chat/agent 模式 query 必填，workflow 模式用 inputs
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "query is required")
 
     if body.conversation_id:
         try:
@@ -83,7 +87,9 @@ async def send_message(
         await db.flush()
 
     # 用户消息在开流前落库：即使生成器从未推进，提问也不丢
-    db.add(Message(conversation_id=conv.id, role="user", content=body.query))
+    # workflow 模式无 query 时，用 inputs 摘要作为用户消息内容
+    user_content = body.query or json.dumps(inputs, ensure_ascii=False)[:8000]
+    db.add(Message(conversation_id=conv.id, role="user", content=user_content))
     conv.message_count = (conv.message_count or 0) + 1
     await db.commit()
 

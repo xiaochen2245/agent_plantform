@@ -40,21 +40,42 @@ SSE_OK = sse_events(
 
 
 def fake_dify_client(body: bytes, status: int = 200, captured: list | None = None) -> DifyClient:
-    """固定响应体（可整段捕获请求供断言）。"""
+    """固定响应体（可整段捕获请求供断言）。
+
+    按路由分流：/v1/files/upload（契约 v4，multipart）回 JSON 文件 id；
+    其余（chat-messages / workflows，JSON）回给定 SSE 字节流。
+    """
 
     def handler(request: httpx.Request) -> httpx.Response:
         if captured is not None:
-            captured.append(
-                {
-                    "url": str(request.url),
-                    "headers": dict(request.headers),
-                    "json": json.loads(request.content.decode()),
-                }
-            )
+            entry = {"url": str(request.url), "headers": dict(request.headers)}
+            ctype = request.headers.get("content-type", "")
+            if ctype.startswith("application/json"):
+                entry["json"] = json.loads(request.content.decode())
+            else:
+                entry["content"] = request.content  # multipart 原始字节
+            captured.append(entry)
+        if str(request.url).endswith("/v1/files/upload"):
+            return httpx.Response(201, json={"id": "dify-file-1"})
         return httpx.Response(
             status,
             content=body,
             headers={"content-type": "text/event-stream"},
+        )
+
+    return DifyClient(base_url="http://fake-dify", transport=httpx.MockTransport(handler))
+
+
+def failing_upload_dify_client(body: bytes, captured: list | None = None) -> DifyClient:
+    """/files/upload 恒 500（转发失败跳过路径）；其余走正常 SSE。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if captured is not None:
+            captured.append({"url": str(request.url), "headers": dict(request.headers)})
+        if str(request.url).endswith("/v1/files/upload"):
+            return httpx.Response(500, json={"code": "internal_error"})
+        return httpx.Response(
+            200, content=body, headers={"content-type": "text/event-stream"}
         )
 
     return DifyClient(base_url="http://fake-dify", transport=httpx.MockTransport(handler))

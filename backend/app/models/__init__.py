@@ -6,6 +6,7 @@ from app.models.department import Department
 from app.models.message import Message
 from app.models.refresh_token import RefreshToken
 from app.models.role import Role, user_roles
+from app.models.upload_file import UploadFile
 from app.models.user import User
 
 __all__ = [
@@ -16,6 +17,7 @@ __all__ = [
     "Message",
     "RefreshToken",
     "Role",
+    "UploadFile",
     "User",
     "user_roles",
 ]

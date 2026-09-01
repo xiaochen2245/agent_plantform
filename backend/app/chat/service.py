@@ -60,6 +60,7 @@ async def stream_dify_events(
     app_row: App,
     conversation: Conversation,
     query: str,
+    files: list[dict] | None = None,
 ) -> AsyncIterator[str]:
     accumulated = ""
     token_usage: dict | None = None
@@ -71,6 +72,9 @@ async def stream_dify_events(
         "conversation_id": conversation.dify_conversation_id or "",
         "user": str(user.id),
     }
+    # 契约 v4：附件经发送时转发，携带 Dify 形态的 files 参数
+    if files:
+        payload["files"] = files
 
     terminal = False  # 正常结束 / 超时 / 错误 → 终端路径（区别于客户端断流）
     try:

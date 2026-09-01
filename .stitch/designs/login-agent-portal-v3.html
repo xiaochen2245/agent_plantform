@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Agent 平台 - 登录</title>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&amp;family=Inter:wght@400;500;600&amp;family=Noto+Sans+SC:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,300,0..1,0" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+<style>
+  :root { --teal:#0F766E; --teal-bright:#14B8A6; --ink:#0F172A; --mist:#F8FAFC; --line:#E2E8F0; }
+  body { font-family: 'Inter','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif; }
+  .font-display { font-family: 'Montserrat','Noto Sans SC',sans-serif; }
+  .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+  .eyebrow { font-size:11px; font-weight:600; letter-spacing:0.14em; text-transform:uppercase; color:#14B8A6; }
+  .dotgrid {
+    background-image: radial-gradient(circle, rgba(15,118,110,0.10) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+  .cap-tile { box-shadow: inset 0 0 0 1px rgba(15,118,110,0.10); }
+  .btn-primary { box-shadow: 0 1px 2px rgba(15,23,42,.06), 0 6px 16px -4px rgba(15,118,110,.28), inset 0 1px 0 rgba(255,255,255,.12); }
+  .btn-primary:active { transform: translateY(1px); box-shadow: 0 1px 2px rgba(15,118,110,.30); }
+  .card-float { box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 12px 32px -8px rgba(15,23,42,.08), 0 24px 64px -24px rgba(15,23,42,.06); }
+  input[type=checkbox] { accent-color: var(--teal); }
+</style>
+</head>
+<body class="h-screen w-screen overflow-hidden flex flex-col md:flex-row antialiased selection:bg-[#0F766E] selection:text-white bg-[#F8FAFC]">
+
+<!-- ═══════════ Left Brand Panel (55%) ═══════════ -->
+<div class="hidden md:flex md:w-[55%] h-full relative flex-col justify-between px-14 lg:px-20 py-12 border-r border-[#E2E8F0] bg-[#F8FAFC] overflow-hidden">
+
+  <!-- fine dot grid texture -->
+  <div class="absolute inset-0 dotgrid opacity-60 pointer-events-none"></div>
+  <!-- abstract line motif: concentric rounded orbits -->
+  <svg class="absolute -right-32 -bottom-40 w-[560px] h-[560px] pointer-events-none" viewBox="0 0 560 560" fill="none" aria-hidden="true">
+    <rect x="120" y="120" width="320" height="320" rx="72" stroke="#0F766E" stroke-opacity="0.10" stroke-width="1.5"/>
+    <rect x="170" y="170" width="220" height="220" rx="52" stroke="#0F766E" stroke-opacity="0.14" stroke-width="1.5" stroke-dasharray="3 7"/>
+    <circle cx="290" cy="290" r="58" stroke="#14B8A6" stroke-opacity="0.35" stroke-width="1.5"/>
+    <circle cx="290" cy="290" r="7" fill="#14B8A6" fill-opacity="0.55"/>
+    <circle cx="440" cy="290" r="4" fill="#0F766E" fill-opacity="0.35"/>
+  </svg>
+
+  <!-- Logomark lockup -->
+  <div class="relative flex items-center gap-3">
+    <div class="w-10 h-10 rounded-xl bg-[#0F766E] flex items-center justify-center shadow-[0_4px_12px_-2px_rgba(15,118,110,.40)]">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+        <circle cx="12" cy="12" r="3.2" fill="#fff"/>
+        <circle cx="12" cy="12" r="8.2" stroke="#fff" stroke-opacity=".55" stroke-width="1.4"/>
+        <circle cx="12" cy="3.8" r="1.6" fill="#14B8A6"/>
+        <circle cx="20.2" cy="12" r="1.6" fill="#14B8A6" fill-opacity=".6"/>
+      </svg>
+    </div>
+    <div>
+      <div class="font-display text-[17px] font-bold tracking-[-0.01em] text-[#0F172A] leading-none">Agent 平台</div>
+      <div class="mt-1.5 text-[10px] font-semibold tracking-[0.18em] text-[#94A3B8]">ENTERPRISE&nbsp;AI&nbsp;WORKSPACE</div>
+    </div>
+  </div>
+
+  <!-- Editorial headline + capabilities -->
+  <div class="relative max-w-[440px]">
+    <div class="eyebrow mb-5">一个入口 · 问所有事</div>
+    <h1 class="font-display text-[40px] leading-[1.18] font-bold tracking-[-0.02em] text-[#0F172A]">
+      让每位员工，<br/>都有一位<span class="text-[#0F766E]"> AI 同事</span>。
+    </h1>
+    <p class="mt-5 text-[15px] leading-[1.7] text-[#64748B]">
+      企业智能助手平台 —— 汇聚运维、财务、研发的领域知识，<br class="hidden lg:block"/>以统一的对话入口，秒级响应日常工作问题。
+    </p>
+
+    <ul class="mt-12 space-y-5">
+      <li class="flex items-center gap-4">
+        <div class="cap-tile w-10 h-10 rounded-[10px] bg-[#0F766E]/[.07] flex items-center justify-center shrink-0">
+          <span class="material-symbols-outlined text-[20px] text-[#0F766E]">dns</span>
+        </div>
+        <div>
+          <div class="text-[14px] font-semibold text-[#0F172A] leading-tight">IT 运维问答</div>
+          <div class="mt-0.5 text-[12px] text-[#94A3B8] leading-tight">服务器、网络与账号问题，即时诊断</div>
+        </div>
+      </li>
+      <li class="flex items-center gap-4">
+        <div class="cap-tile w-10 h-10 rounded-[10px] bg-[#0F766E]/[.07] flex items-center justify-center shrink-0">
+          <span class="material-symbols-outlined text-[20px] text-[#0F766E]">receipt_long</span>
+        </div>
+        <div>
+          <div class="text-[14px] font-semibold text-[#0F172A] leading-tight">报销政策查询</div>
+          <div class="mt-0.5 text-[12px] text-[#94A3B8] leading-tight">差旅与报销规则，一条消息问清楚</div>
+        </div>
+      </li>
+      <li class="flex items-center gap-4">
+        <div class="cap-tile w-10 h-10 rounded-[10px] bg-[#0F766E]/[.07] flex items-center justify-center shrink-0">
+          <span class="material-symbols-outlined text-[20px] text-[#0F766E]">code_blocks</span>
+        </div>
+        <div>
+          <div class="text-[14px] font-semibold text-[#0F172A] leading-tight">代码评审助手</div>
+          <div class="mt-0.5 text-[12px] text-[#94A3B8] leading-tight">提交前预审，指出隐患与规范偏差</div>
+        </div>
+      </li>
+    </ul>
+  </div>
+
+  <!-- Panel footer -->
+  <div class="relative flex items-center gap-2 text-[11px] tracking-[0.06em] text-[#94A3B8]">
+    <span class="material-symbols-outlined text-[14px]">verified_user</span>
+    仅限公司内网访问 · 数据不出企业边界
+  </div>
+</div>
+
+<!-- ═══════════ Right Auth Area (45%) ═══════════ -->
+<div class="w-full md:w-[45%] h-full bg-white flex items-center justify-center p-6 sm:p-12 relative">
+  <div class="w-full max-w-[400px]">
+
+    <!-- Mobile logomark (desktop hidden) -->
+    <div class="md:hidden mb-10 flex items-center gap-3">
+      <div class="w-9 h-9 rounded-[10px] bg-[#0F766E] flex items-center justify-center">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" fill="#fff"/><circle cx="12" cy="12" r="8" stroke="#fff" stroke-opacity=".55" stroke-width="1.4"/></svg>
+      </div>
+      <span class="font-display text-[16px] font-bold text-[#0F172A]">Agent 平台</span>
+    </div>
+
+    <!-- Auth card -->
+    <div class="card-float rounded-2xl bg-white ring-1 ring-black/[.04] p-9 sm:p-10">
+      <div class="eyebrow mb-2">欢迎回来</div>
+      <h2 class="font-display text-[28px] font-bold tracking-[-0.02em] text-[#0F172A] mb-8">登录</h2>
+
+      <form class="space-y-5" onsubmit="event.preventDefault();">
+        <!-- Email -->
+        <div>
+          <label class="block text-[12px] font-semibold text-[#64748B] mb-2 tracking-[0.05em]" for="email">企业邮箱</label>
+          <div class="relative">
+            <span class="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-[19px] text-[#94A3B8] pointer-events-none">mail</span>
+            <input id="email" name="email" type="email" required placeholder="yourname@company.com"
+              class="w-full h-[48px] pl-11 pr-4 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] text-[14px] text-[#0F172A] placeholder:text-[#B6C2CF] focus:outline-none focus:border-[#0F766E] focus:ring-[3px] focus:ring-[#0F766E]/[.12] focus:bg-white transition-all"/>
+          </div>
+        </div>
+
+        <!-- Password -->
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <label class="block text-[12px] font-semibold text-[#64748B] tracking-[0.05em]" for="password">密码</label>
+            <a href="#" class="text-[12px] font-medium text-[#0F766E] hover:text-[#115e59] transition-colors">忘记密码？</a>
+          </div>
+          <div class="relative">
+            <span class="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-[19px] text-[#94A3B8] pointer-events-none">lock</span>
+            <input id="password" name="password" type="password" required placeholder="••••••••"
+              class="w-full h-[48px] pl-11 pr-11 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] text-[14px] text-[#0F172A] placeholder:text-[#B6C2CF] focus:outline-none focus:border-[#0F766E] focus:ring-[3px] focus:ring-[#0F766E]/[.12] focus:bg-white transition-all"/>
+            <button type="button" aria-label="显示密码" class="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-md text-[#94A3B8] hover:text-[#475569] transition-colors">
+              <span class="material-symbols-outlined text-[19px]">visibility</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Remember me -->
+        <label class="flex items-center gap-2.5 cursor-pointer select-none pt-1" for="remember">
+          <input id="remember" type="checkbox" class="h-4 w-4 rounded border-[#CBD5E1] bg-white"/>
+          <span class="text-[13px] text-[#475569]">记住我</span>
+        </label>
+
+        <!-- Submit -->
+        <button type="submit"
+          class="btn-primary w-full h-[48px] rounded-xl bg-[#0F766E] hover:bg-[#0d6a63] text-white text-[15px] font-semibold tracking-[0.02em] focus:outline-none focus-visible:ring-[3px] focus-visible:ring-[#0F766E]/[.25] transition-all mt-2">
+          登&nbsp;录
+        </button>
+
+        <!-- Divider + SSO hint -->
+        <div class="flex items-center gap-3 pt-3">
+          <div class="h-px flex-1 bg-[#F1F5F9]"></div>
+          <span class="text-[11px] text-[#B6C2CF] tracking-[0.08em]">或</span>
+          <div class="h-px flex-1 bg-[#F1F5F9]"></div>
+        </div>
+        <button type="button" disabled
+          class="w-full h-[44px] rounded-xl border border-dashed border-[#E2E8F0] text-[13px] font-medium text-[#94A3B8] cursor-not-allowed flex items-center justify-center gap-2">
+          <span class="material-symbols-outlined text-[17px]">badge</span>
+          企业统一认证登录（即将上线）
+        </button>
+      </form>
+    </div>
+
+    <!-- Footnote -->
+    <p class="mt-7 text-center text-[12px] leading-[1.7] text-[#94A3B8]">
+      仅限公司内部员工使用 · 遇到问题联系
+      <span class="text-[#64748B] font-medium">IT 服务台</span>
+    </p>
+  </div>
+</div>
+</body>
+</html>

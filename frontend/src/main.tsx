@@ -6,8 +6,12 @@ import zhCN from "antd/locale/zh_CN";
 import App from "./App";
 import "./styles/global.css";
 
+import { USE_MOCKS } from "./config";
+
 async function enableMocking() {
-  if (!import.meta.env.DEV) return;
+  // 仅 dev 且未被 VITE_USE_MOCKS=false 显式关闭时启用 MSW；
+  // 生产构建（DEV=false）下此分支恒假 → 无 mock 泄漏。
+  if (!import.meta.env.DEV || !USE_MOCKS) return;
   const { worker } = await import("./mocks/browser");
   await worker.start({ onUnhandledRequest: "bypass" });
 }

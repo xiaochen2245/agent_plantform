@@ -1,12 +1,11 @@
 import { PlusOutlined, RobotOutlined } from "@ant-design/icons";
-import { Button, Empty, Spin } from "antd";
+import { Button, Empty, Select, Spin } from "antd";
 import { useEffect, useRef } from "react";
-import AgentSidebar from "../components/AgentSidebar";
 import Composer from "../components/Composer";
 import MessageItem from "../components/MessageItem";
 import { useChatStore } from "../stores/chat";
 
-/** 对话主界面：左侧 Agent 列表 + 居中 760px 线程 + 底部 composer。 */
+/** 对话主界面（AppShell 内）：顶栏 Agent 切换 + 居中 760px 线程 + 底部 composer。 */
 export default function Chat() {
   const appsLoading = useChatStore((s) => s.appsLoading);
   const loadApps = useChatStore((s) => s.loadApps);
@@ -16,6 +15,9 @@ export default function Chat() {
   const sendMessage = useChatStore((s) => s.sendMessage);
   const retryLast = useChatStore((s) => s.retryLast);
   const stopStreaming = useChatStore((s) => s.stopStreaming);
+
+  const apps = useChatStore((s) => s.apps);
+  const setActiveApp = useChatStore((s) => s.setActiveApp);
 
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -28,17 +30,20 @@ export default function Chat() {
   }, [messages]);
 
   return (
-    <div className="chat-shell">
-      <AgentSidebar />
-
-      <main className="chat-main">
-        <div className="chat-topbar">
-          <RobotOutlined style={{ color: "var(--teal)", fontSize: 18 }} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="agent-name">{activeApp?.name ?? "选择一个 Agent"}</div>
-            {activeApp && <div className="agent-desc">{activeApp.description}</div>}
-          </div>
-          <Button
+    <div className="chat-main">
+      <div className="chat-topbar">
+        <RobotOutlined style={{ color: "var(--teal)", fontSize: 18 }} />
+        <Select
+          value={activeApp?.id ?? undefined}
+          placeholder="选择 Agent"
+          style={{ width: 220 }}
+          popupMatchSelectWidth={false}
+          disabled={streaming}
+          onChange={(id) => setActiveApp(id)}
+          options={apps.map((a) => ({ value: a.id, label: a.name }))}
+        />
+        {activeApp && <div className="agent-desc" style={{ flex: 1, minWidth: 0 }}>{activeApp.description}</div>}
+        <Button
             type="primary"
             icon={<PlusOutlined />}
             disabled={streaming || !activeApp}
@@ -46,9 +51,8 @@ export default function Chat() {
           >
             新对话
           </Button>
-        </div>
-
-        <div className="chat-thread">
+      </div>
+      <div className="chat-thread">
           {appsLoading && messages.length === 0 ? (
             <div style={{ display: "flex", justifyContent: "center", marginTop: 120 }}>
               <Spin />
@@ -63,7 +67,7 @@ export default function Chat() {
                       向 <b style={{ color: "var(--ink)" }}>{activeApp.name}</b> 提出你的第一个问题
                     </span>
                   ) : (
-                    "选择左侧 Agent 开始对话"
+                    "选择上方 Agent 开始对话"
                   )
                 }
               />
@@ -76,15 +80,14 @@ export default function Chat() {
               <div ref={bottomRef} />
             </div>
           )}
-        </div>
+      </div>
 
-        <Composer
-          disabled={!activeApp}
-          streaming={streaming}
-          onSend={(q) => void sendMessage(q)}
-          onStop={stopStreaming}
-        />
-      </main>
+      <Composer
+        disabled={!activeApp}
+        streaming={streaming}
+        onSend={(q) => void sendMessage(q)}
+        onStop={stopStreaming}
+      />
     </div>
   );
 }

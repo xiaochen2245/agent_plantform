@@ -696,32 +696,11 @@ body {
   overflow-y: auto;
 }
 
-.admin-stats {
+.admin-toolbar {
   display: flex;
+  align-items: center;
   gap: 12px;
   padding: 16px 24px 4px;
-}
-
-.stat-chip {
-  background: var(--white);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 12px 20px;
-  min-width: 120px;
-}
-
-.stat-chip .label {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
-}
-
-.stat-chip .value {
-  font-size: 22px;
-  font-weight: 700;
-  margin-top: 2px;
-  font-variant-numeric: tabular-nums;
 }
 
 .admin-table {

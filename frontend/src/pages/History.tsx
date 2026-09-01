@@ -20,8 +20,8 @@ function relativeTime(iso: string): string {
 
 function toChatMessage(m: ConversationMessage): ChatMessage {
   return {
-    id: m.id,
-    conversationId: m.id, // 回放场景无活跃会话语义，占位即可
+    id: String(m.id), // 详情端点 id 为 int（契约 v2），消息 id 字符串化复用 ChatMessage
+    conversationId: String(m.id), // 回放场景无活跃会话语义，占位即可
     role: m.role,
     content: m.content,
     status: "done",
@@ -37,7 +37,6 @@ export default function History() {
   const loadApps = useChatStore((s) => s.loadApps);
   const loadConversations = useChatStore((s) => s.loadConversations);
   const conversationsByApp = useChatStore((s) => s.conversationsByApp);
-  const messagesByConv = useChatStore((s) => s.messagesByConv);
   const resumeConversation = useChatStore((s) => s.resumeConversation);
 
   const [appFilter, setAppFilter] = useState<number | "all">("all");
@@ -45,6 +44,7 @@ export default function History() {
   const [selected, setSelected] = useState<{ appId: number; convId: string; title: string } | null>(null);
   const [replay, setReplay] = useState<ChatMessage[] | null>(null);
   const [replayLoading, setReplayLoading] = useState(false);
+  const [replayFailed, setReplayFailed] = useState(false);
 
   useEffect(() => {
     if (apps.length === 0) void loadApps();
@@ -74,22 +74,17 @@ export default function History() {
           appName: apps.find((a) => a.id === appFilter)?.name ?? "",
         }));
 
+  // 回放真相源 = 后端消息详情端点（契约 v2）。失败 → 错误空态 + 重试，不静默吞错。
   async function openConversation(appId: number, convId: string, title: string) {
     setSelected({ appId, convId, title });
     setReplayLoading(true);
+    setReplayFailed(false);
     setReplay(null);
-    // 本地缓存优先（当前会话在线程里有完整消息）；否则拉详情端点（mock 提供；真实后端未建 → 空态兜底）
-    const local = messagesByConv[convId];
-    if (local && local.length > 0) {
-      setReplay(local);
-      setReplayLoading(false);
-      return;
-    }
     try {
       const msgs = await fetchConversationMessages(convId);
       setReplay(msgs.map(toChatMessage));
     } catch {
-      setReplay([]); // TODO(契约缺口)：真实后端暂无 /api/conversations/:id/messages，展示空态
+      setReplayFailed(true);
     } finally {
       setReplayLoading(false);
     }
@@ -164,13 +159,29 @@ export default function History() {
                   <div style={{ display: "flex", justifyContent: "center", marginTop: 80 }}>
                     <Spin />
                   </div>
+                ) : replayFailed ? (
+                  <Empty
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    style={{ marginTop: 80 }}
+                    description={
+                      <span style={{ color: "var(--text-muted)", fontSize: 12.5 }}>
+                        回放加载失败，请稍后重试
+                      </span>
+                    }
+                  >
+                    <Button
+                      onClick={() => selected && void openConversation(selected.appId, selected.convId, selected.title)}
+                    >
+                      重试
+                    </Button>
+                  </Empty>
                 ) : replay === null || replay.length === 0 ? (
                   <Empty
                     image={Empty.PRESENTED_IMAGE_SIMPLE}
                     style={{ marginTop: 80 }}
                     description={
                       <span style={{ color: "var(--text-muted)", fontSize: 12.5 }}>
-                        暂无回放数据（消息详情端点待后端提供）
+                        该会话暂无消息记录
                       </span>
                     }
                   />

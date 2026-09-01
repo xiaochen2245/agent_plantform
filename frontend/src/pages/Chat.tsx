@@ -3,6 +3,7 @@ import { Button, Empty, Select, Spin } from "antd";
 import { useEffect, useRef } from "react";
 import Composer from "../components/Composer";
 import MessageItem from "../components/MessageItem";
+import WorkflowComposer from "../components/WorkflowComposer";
 import { useChatStore } from "../stores/chat";
 
 /** 对话主界面（AppShell 内）：顶栏 Agent 切换 + 居中 760px 线程 + 底部 composer。 */
@@ -18,6 +19,10 @@ export default function Chat() {
 
   const apps = useChatStore((s) => s.apps);
   const setActiveApp = useChatStore((s) => s.setActiveApp);
+
+  // 契约 v3：带必填输入的 workflow 应用 → 表单式输入区替代普通 composer
+  const isWorkflow =
+    activeApp?.mode === "workflow" && (activeApp.inputs_schema?.length ?? 0) > 0;
 
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -64,7 +69,15 @@ export default function Chat() {
                 description={
                   activeApp ? (
                     <span style={{ color: "var(--text-muted)" }}>
-                      向 <b style={{ color: "var(--ink)" }}>{activeApp.name}</b> 提出你的第一个问题
+                      {isWorkflow ? (
+                        <>
+                          填写表单，生成你在 <b style={{ color: "var(--ink)" }}>{activeApp.name}</b> 的第一份结果
+                        </>
+                      ) : (
+                        <>
+                          向 <b style={{ color: "var(--ink)" }}>{activeApp.name}</b> 提出你的第一个问题
+                        </>
+                      )}
                     </span>
                   ) : (
                     "选择上方 Agent 开始对话"
@@ -82,12 +95,24 @@ export default function Chat() {
           )}
       </div>
 
-      <Composer
-        disabled={!activeApp}
-        streaming={streaming}
-        onSend={(q) => void sendMessage(q)}
-        onStop={stopStreaming}
-      />
+      {isWorkflow && activeApp ? (
+        <WorkflowComposer
+          appName={activeApp.name}
+          schema={activeApp.inputs_schema ?? []}
+          disabled={!activeApp}
+          streaming={streaming}
+          onSubmit={(values) =>
+            void sendMessage(Object.values(values).join(" "), values)
+          }
+        />
+      ) : (
+        <Composer
+          disabled={!activeApp}
+          streaming={streaming}
+          onSend={(q) => void sendMessage(q)}
+          onStop={stopStreaming}
+        />
+      )}
     </div>
   );
 }

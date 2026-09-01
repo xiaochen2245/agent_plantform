@@ -1,4 +1,4 @@
-"""Chat 路由：POST /api/chat/send（SSE 透传代理）。"""
+"""Chat 路由：POST /api/chat/send（SSE 透传代理；v3 增工作流模式分支）。"""
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import current_user
 from app.authz import is_authorized
-from app.chat.service import stream_dify_events
+from app.chat.service import stream_dify_events, stream_workflow_events
 from app.db.session import get_db
 from app.dify.deps import get_dify
 from app.dify.client import DifyClient
@@ -18,6 +18,25 @@ from app.models.user import User
 from app.schemas.chat import ChatSendRequest
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
+
+
+def _validate_workflow_inputs(schema: list, inputs: dict) -> None:
+    """契约 v3：缺必填 → 400 {"detail": "missing required input: <name>"}。"""
+    for field in schema or []:
+        name = str(field.get("name", ""))
+        if field.get("required") and not str(inputs.get(name, "")).strip():
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, f"missing required input: {name}"
+            )
+
+
+def _workflow_title(schema: list, inputs: dict, query: str) -> str:
+    """契约 v3：title 取首个 inputs 值，否则 query 前 20 字。"""
+    for field in schema or []:
+        value = str(inputs.get(str(field.get("name", "")), "")).strip()
+        if value:
+            return value[:20]
+    return query[:20]
 
 
 @router.post("/send")
@@ -35,6 +54,11 @@ async def send_message(
     if not await is_authorized(db, user, app_row.id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not authorized for this app")
 
+    is_workflow = app_row.mode == "workflow"
+    inputs = dict(body.inputs or {})
+    if is_workflow:
+        _validate_workflow_inputs(app_row.inputs_schema or [], inputs)
+
     if body.conversation_id:
         try:
             conv_id = uuid.UUID(body.conversation_id)
@@ -49,9 +73,12 @@ async def send_message(
         ):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Conversation not found")
     else:
-        conv = Conversation(
-            user_id=user.id, app_id=app_row.id, title=body.query[:20]
+        title = (
+            _workflow_title(app_row.inputs_schema or [], inputs, body.query)
+            if is_workflow
+            else body.query[:20]
         )
+        conv = Conversation(user_id=user.id, app_id=app_row.id, title=title)
         db.add(conv)
         await db.flush()
 
@@ -60,8 +87,13 @@ async def send_message(
     conv.message_count = (conv.message_count or 0) + 1
     await db.commit()
 
+    generator = (
+        stream_workflow_events(dify, user, app_row, conv, inputs)
+        if is_workflow
+        else stream_dify_events(dify, user, app_row, conv, body.query)
+    )
     return StreamingResponse(
-        stream_dify_events(dify, user, app_row, conv, body.query),
+        generator,
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

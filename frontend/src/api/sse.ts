@@ -90,7 +90,10 @@ export async function sendChatStream(
   handlers: SendChatHandlers,
   signal?: AbortSignal
 ): Promise<void> {
-  const resp = await fetch("/api/chat/send", {
+  // 相对路径在浏览器 fetch 中合法；Node/jsdom（测试）无 base URL 会抛错，
+  // 显式锚定 origin 两边行为一致
+  const url = new URL("/api/chat/send", window.location.origin).toString();
+  const resp = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",

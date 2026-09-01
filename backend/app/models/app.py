@@ -5,7 +5,7 @@ dify_app_id 与 API key 的真实绑定后续入库加密（设计 §7.1），
 """
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Integer, String, func
+from sqlalchemy import JSON, BigInteger, DateTime, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -22,6 +22,8 @@ class App(Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     mode: Mapped[str] = mapped_column(String(20), default="chat", nullable=False)  # chat / agent / workflow / completion
+    # 契约 v3：workflow 应用必填输入描述 [{name,label,type,required}]；手工维护（console 自动同步不做）
+    inputs_schema: Mapped[list | None] = mapped_column(JSON, nullable=True)
     status: Mapped[int] = mapped_column(default=1, nullable=False)  # 1 启用 / 0 下架
     synced_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

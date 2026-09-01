@@ -50,5 +50,20 @@ class DifyClient:
         finally:
             await response.aclose()
 
+    @asynccontextmanager
+    async def stream_workflow(self, app_id: int, payload: dict) -> AsyncIterator[httpx.Response]:
+        """流式调用 Dify workflows/run（契约 v3 工作流模式）；状态码由调用方判定。"""
+        request = self._client.build_request(
+            "POST",
+            "/v1/workflows/run",
+            json=payload,
+            headers={"Authorization": f"Bearer {app_api_key(app_id)}"},
+        )
+        response = await self._client.send(request, stream=True)
+        try:
+            yield response
+        finally:
+            await response.aclose()
+
     async def aclose(self) -> None:
         await self._client.aclose()

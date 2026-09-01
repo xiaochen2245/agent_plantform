@@ -66,7 +66,7 @@ async def test_user_role_sees_all_seed_apps(client: AsyncClient):
     """USER 角色经种子 role 授权全员可见（保住既有体验）。"""
     await mkuser("u1@company.com", role_codes=("USER",))
     await login(client, "u1@company.com", "guest-pass-123")
-    assert await _apps_of(client) == [1, 2, 3]
+    assert await _apps_of(client) == [1, 2, 3, 4]  # 契约 v3：+app4 workflow
 
 
 async def test_direct_grant_only(client: AsyncClient):
@@ -104,7 +104,7 @@ async def test_union_of_three_principals(client: AsyncClient):
     await grant(2, "dept", 7)     # 部门 → 2
     await grant(1, "role", fin_id)  # 角色 → 1
     await login(client, "u5@company.com", "guest-pass-123")
-    assert await _apps_of(client) == [1, 2, 3]
+    assert await _apps_of(client) == [1, 2, 3]  # 三态并集精确集（GUEST 无 USER 种子授权，看不到 app4）
 
 
 async def test_no_grant_invisible_and_chat_403(client: AsyncClient):
@@ -123,7 +123,7 @@ async def test_platform_admin_unrestricted(client: AsyncClient):
     """PLATFORM_ADMIN 即使零个人授权也全可见。"""
     await mkuser("boss@company.com", role_codes=("PLATFORM_ADMIN",))
     await login(client, "boss@company.com", "guest-pass-123")
-    assert await _apps_of(client) == [1, 2, 3]
+    assert await _apps_of(client) == [1, 2, 3, 4]  # 契约 v3：+app4 workflow
 
 
 async def test_authorized_user_can_still_chat(client: AsyncClient):

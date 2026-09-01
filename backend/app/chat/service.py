@@ -20,6 +20,9 @@ from app.models.conversation import Conversation
 from app.models.message import Message
 from app.models.user import User
 
+# 契约 v3：workflow 事件中需要丢弃的词汇（不透传给前端）
+_WORKFLOW_DROP_EVENTS = {"ping", "workflow_started", "node_started", "node_finished"}
+
 
 def _sse(event: str, data: dict | None = None) -> str:
     payload = json.dumps(data or {}, ensure_ascii=False)
@@ -120,6 +123,98 @@ async def stream_dify_events(
             accumulated,
             token_usage,
             dify_conversation_id,
+        )
+
+    if terminal:
+        yield _sse("agent_done")
+
+
+async def stream_workflow_events(
+    dify: DifyClient,
+    user: User,
+    app_row: App,
+    conversation: Conversation,
+    inputs: dict,
+) -> AsyncIterator[str]:
+    """工作流模式（契约 v3）：调 /v1/workflows/run 并把事件翻译为统一对话词汇表。
+
+    翻译映射：
+    - ping / workflow_started / node_started / node_finished → 丢弃
+    - text_chunk(data.text) → message(answer)
+    - workflow_finished → message_end(usage.total=total_tokens)；
+      status=failed → error(契约形状)，不吐 message_end
+    - 非事件行 / 解析失败的行 → 跳过
+    落库与 agent_done 语义与 chat 分支一致（finally 兜底 + 终端路径）。
+    """
+    accumulated = ""
+    token_usage: dict | None = None
+    payload = {
+        "inputs": inputs,
+        "response_mode": "streaming",
+        "user": str(user.id),
+    }
+
+    terminal = False
+    try:
+        async with dify.stream_workflow(app_row.id, payload) as resp:
+            if resp.status_code != 200:
+                yield _sse("error", {"message": f"Dify upstream error: {resp.status_code}"})
+                terminal = True
+            else:
+                # event 名优先取 event: 行（SSE 规范），回退 data.event（真实样本两者皆有）
+                current_event = ""
+                async for line in resp.aiter_lines():
+                    if not line:
+                        current_event = ""  # 事件块结束，防止误用上一块事件名
+                        continue
+                    if line.startswith("event:"):
+                        current_event = line.split(":", 1)[1].strip()
+                        continue
+                    if not line.startswith("data:"):
+                        continue
+                    raw = line.split(":", 1)[1].strip()
+                    try:
+                        data = json.loads(raw)
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+                    if not isinstance(data, dict):
+                        continue
+                    ev = current_event or str(data.get("event", ""))
+                    if ev in _WORKFLOW_DROP_EVENTS:
+                        continue
+                    if ev == "text_chunk":
+                        text = str((data.get("data") or {}).get("text") or "")
+                        if text:
+                            accumulated += text
+                            yield _sse("message", {"answer": text})
+                    elif ev == "workflow_finished":
+                        finish = data.get("data") or {}
+                        if finish.get("status") == "failed":
+                            yield _sse(
+                                "error",
+                                {"message": str(finish.get("error") or "workflow failed")},
+                            )
+                        else:
+                            total = int(finish.get("total_tokens") or 0)
+                            token_usage = {"total": total}
+                            yield _sse(
+                                "message_end", {"metadata": {"usage": {"total": total}}}
+                            )
+                terminal = True
+    except httpx.TimeoutException:
+        yield _sse("error", {"message": "Dify timeout"})
+        terminal = True
+    except Exception:
+        yield _sse("error", {"message": "Proxy error"})
+        terminal = True
+    finally:
+        # 工作流无 Dify 会话概念：dify_conversation_id 恒 None
+        await _persist_assistant(
+            SessionLocal,
+            conversation.id,
+            accumulated,
+            token_usage,
+            None,
         )
 
     if terminal:

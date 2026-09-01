@@ -19,11 +19,19 @@ from app.db.session import SessionLocal, engine
 from app.models import App, RefreshToken, User  # noqa: F401 RefreshToken 触发表注册
 from app.models import AppAuthorization, Role, user_roles
 
-# 契约 docs/api-contract.md §Apps 的三个 Agent（id 显式固定对齐契约）
-SEED_APPS: list[tuple[int, str, str, str, str]] = [
-    (1, "app-test-001", "IT 运维助手", "解答服务器、网络与账号问题", "chat"),
-    (2, "app-test-002", "报销政策问答", "差旅与报销规则查询", "chat"),
-    (3, "app-test-003", "代码评审助手", "MR 预审与规范检查", "agent"),
+# 契约 docs/api-contract.md §Apps 的 Agent（id 显式固定对齐契约；v3 增补 app 4 工作流模式）
+SEED_APPS: list[tuple[int, str, str, str, str, list | None]] = [
+    (1, "app-test-001", "IT 运维助手", "解答服务器、网络与账号问题", "chat", None),
+    (2, "app-test-002", "报销政策问答", "差旅与报销规则查询", "chat", None),
+    (3, "app-test-003", "代码评审助手", "MR 预审与规范检查", "agent", None),
+    (
+        4,
+        "app-test-004",
+        "名片生成助手",
+        "输入名片信息，生成排版名片",
+        "workflow",
+        [{"name": "business_card", "label": "名片内容", "type": "paragraph", "required": True}],
+    ),
 ]
 
 SEED_ROLES: list[tuple[int, str, str]] = [
@@ -74,8 +82,9 @@ async def _seed_admin(session: AsyncSession) -> None:
 
 
 async def _seed_apps(session: AsyncSession) -> None:
-    if await session.scalar(select(App).limit(1)) is None:
-        for app_id, dify_id, name, description, mode in SEED_APPS:
+    """按 dify_app_id 幂等：空库全量建；存量库（dev.db）只补新增行。"""
+    for app_id, dify_id, name, description, mode, inputs_schema in SEED_APPS:
+        if await session.scalar(select(App).where(App.dify_app_id == dify_id)) is None:
             session.add(
                 App(
                     id=app_id,
@@ -83,9 +92,10 @@ async def _seed_apps(session: AsyncSession) -> None:
                     name=name,
                     description=description,
                     mode=mode,
+                    inputs_schema=inputs_schema,
                 )
             )
-        await session.flush()
+    await session.flush()
 
 
 async def _migrate_json_roles(session: AsyncSession) -> None:

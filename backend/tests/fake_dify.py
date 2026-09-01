@@ -71,3 +71,30 @@ def exploding_dify_client(first_chunk: bytes) -> DifyClient:
         return httpx.Response(200, content=stream())
 
     return DifyClient(base_url="http://fake-dify", transport=httpx.MockTransport(handler))
+
+
+# ── 工作流模式（契约 v3；事件形状取自 docs/fixtures 真实样本）──────────────
+
+# 正常流：ping/started/node 系 + 2 段 text_chunk + 成功 workflow_finished
+WORKFLOW_SSE_OK = sse_events(
+    ("ping", {}),
+    ("workflow_started", {"task_id": "t-1", "data": {"id": "run-1", "inputs": {}}}),
+    ("node_started", {"task_id": "t-1", "data": {"node_id": "n1"}}),
+    ("text_chunk", {"task_id": "t-1", "data": {"text": "名"}}),
+    ("text_chunk", {"task_id": "t-1", "data": {"text": "片已生成：张三 产品经理"}}),
+    ("node_finished", {"task_id": "t-1", "data": {"node_id": "n1"}}),
+    (
+        "workflow_finished",
+        {"task_id": "t-1", "data": {"status": "succeeded", "total_tokens": 77, "error": None}},
+    ),
+)
+
+# 上游校验失败（真实样本：必填输入缺失 → workflow_finished.status=failed）
+WORKFLOW_SSE_FAILED = sse_events(
+    ("ping", {}),
+    ("workflow_started", {"task_id": "t-2", "data": {"id": "run-2", "inputs": {}}}),
+    (
+        "workflow_finished",
+        {"task_id": "t-2", "data": {"status": "failed", "total_tokens": 0, "error": "business_card is required in input form"}},
+    ),
+)

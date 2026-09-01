@@ -7,6 +7,7 @@ class AppOut(BaseModel):
     name: str
     description: str
     mode: str
+    inputs_schema: list[dict] | None = None  # 契约 v3：仅 workflow 应用非空
 
 
 class AppsResponse(BaseModel):
@@ -17,6 +18,7 @@ class ChatSendRequest(BaseModel):
     app_id: int
     query: str = Field(min_length=1, max_length=8000)
     conversation_id: str | None = ""  # 内部 UUID；空串=新建
+    inputs: dict[str, str] | None = None  # 契约 v3：workflow 应用变量透传
 
 
 class ConversationOut(BaseModel):

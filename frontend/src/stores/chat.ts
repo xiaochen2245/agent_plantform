@@ -2,7 +2,6 @@ import { create } from "zustand";
 import { http } from "../api/http";
 import { sendChatStream } from "../api/sse";
 import type { AppInfo, ChatMessage, ConversationSummary } from "../types";
-
 let seq = 0;
 function nextId(prefix: string): string {
   seq += 1;
@@ -25,12 +24,14 @@ interface ChatState {
   setActiveApp: (appId: number) => void;
   messagesOfActive: () => ChatMessage[];
   activeApp: () => AppInfo | null;
-  sendMessage: (query: string) => Promise<void>;
+  sendMessage: (query: string, inputs?: Record<string, string>) => Promise<void>;
   retryLast: () => Promise<void>;
   stopStreaming: () => void;
 }
 
 let abortController: AbortController | null = null;
+/** 最近一次发送的 workflow inputs：重试时保真（chat 应用无 inputs） */
+let lastInputs: Record<string, string> | undefined;
 
 export const useChatStore = create<ChatState>((set, get) => ({
   apps: [],
@@ -85,10 +86,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     return activeConversationId ? messagesByConv[activeConversationId] ?? [] : [];
   },
 
-  async sendMessage(query) {
+  async sendMessage(query, inputs) {
     const state = get();
     const app = state.activeApp();
     if (!app || state.streaming || !query.trim()) return;
+    lastInputs = inputs;
 
     // 无活跃会话时开启新会话（标题取首条问题）
     let conversationId = state.activeConversationId;
@@ -155,7 +157,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     };
 
     await sendChatStream(
-      { app_id: app.id, query: query.trim(), conversation_id: conversationId },
+      { app_id: app.id, query: query.trim(), conversation_id: conversationId, inputs },
       {
         onMessage: (delta) => {
           const current = get().messagesByConv[conversationId as string] ?? [];
@@ -195,7 +197,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ),
       },
     }));
-    await get().sendMessage(lastUser.content);
+    await get().sendMessage(lastUser.content, lastInputs);
   },
 
   stopStreaming() {

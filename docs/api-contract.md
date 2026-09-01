@@ -36,3 +36,25 @@
 
 ## 前后端联调（dev）
 - Vite dev server 5173，`/api` proxy → `http://localhost:8000`（同源携带 cookie）
+
+---
+
+# v2 增补（wave3 · orchestrator 批准）
+
+## 会话消息详情（替代 History 页 mock 兜底）
+- GET /api/conversations/{id}/messages（需登录，仅本人会话）→
+  `{"messages":[{"id":"<int>","role":"user|assistant","content":"...","created_at":"ISO8601"}]}`（按 created_at asc）
+
+## Admin（仅 PLATFORM_ADMIN，403 否则）
+- GET /api/admin/users?query=&status=&page=1&page_size=20 →
+  `{"total":128,"items":[{"id":1,"name":"张明","email":"...","dept":null,"roles":["PLATFORM_ADMIN"],"status":1,"created_at":"ISO8601"}]}`
+- POST /api/admin/users `{"name":"李雷","email":"lei@company.com","password":"...","dept_id":null,"roles":["USER"]}` → 201 同上形状（缺省 roles=["USER"]）
+- PATCH /api/admin/users/{id} `{"name"?,"dept_id"?,"roles"?,"status"?}`（status 1/0）→ 200 同上形状
+- POST /api/admin/users/{id}/reset_password → `{"password":"<8位随机>"}`（同时失效其全部 refresh token）
+- GET /api/admin/users/{id}/apps → `{"app_ids":[1,3]}`
+- PUT /api/admin/users/{id}/apps `{"app_ids":[1,3]}` → 200（用户级授权全量替换；dept/role 级授权本期无端点，模型保留三态）
+
+## 授权语义（/api/apps/me 行为变更）
+- 可见 = 用户直授 ∪ 所属部门 ∪ 拥有角色；无任何授权的 App 不可见、chat/send 调用 403 `{"detail":"Not authorized for this app"}`
+- 种子：三个 App 默认授给角色 `USER`（全员可见，保持现有体验）；admin（PLATFORM_ADMIN）不受限
+- 支撑表：roles(id,code,name)+user_roles、departments(id,name,parent_id,path)、app_authorizations(app_id,principal_type['user'|'dept'|'role'],principal_id)

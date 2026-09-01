@@ -96,7 +96,10 @@ async def init_db(drop: bool = False) -> None:
     async with SessionLocal() as session:  # type: AsyncSession
         await _seed_roles(session)
         await _seed_admin(session)
-        await _seed_apps(session)
+        # 演示应用种子仅限 dev/test：生产（DEBUG=false 且未显式 SEED_DEMO_APPS）不播种，
+        # 应用登记由后续 Agent 工作台切片提供；已有存量行不受影响
+        if settings.seed_demo_apps:
+            await _seed_apps(session)
         await _migrate_json_roles(session)
         await _seed_user_role_grants(session)
         await session.commit()
@@ -173,7 +176,11 @@ async def _seed_user_role_grants(session: AsyncSession) -> None:
     user_role = await session.scalar(select(Role).where(Role.code == "USER"))
     if user_role is None:
         return
+    # 仅对实际存在的 app 授权（生产关闭演示种子后，跳过缺失行避免 FK 违约）
+    existing_ids = set((await session.execute(select(App.id))).scalars().all())
     for app_id, *_ in SEED_APPS:
+        if app_id not in existing_ids:
+            continue
         exists = await session.scalar(
             select(AppAuthorization).where(
                 AppAuthorization.app_id == app_id,

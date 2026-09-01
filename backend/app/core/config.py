@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     # HTTP 部署阶段（TLS 未就绪）可显式设 COOKIE_SECURE=false；缺省跟随 DEBUG
     COOKIE_SECURE: bool | None = None
 
+    # 演示应用种子（apps 表的契约演示行）：缺省跟随 DEBUG；生产可显式 SEED_DEMO_APPS=true 强制
+    SEED_DEMO_APPS: bool | None = None
+
+    @property
+    def seed_demo_apps(self) -> bool:
+        return self.SEED_DEMO_APPS if self.SEED_DEMO_APPS is not None else self.DEBUG
+
     @property
     def cookie_secure(self) -> bool:
         return self.COOKIE_SECURE if self.COOKIE_SECURE is not None else not self.DEBUG

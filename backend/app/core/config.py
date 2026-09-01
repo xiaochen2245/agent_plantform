@@ -1,7 +1,23 @@
 """应用配置（环境变量 / .env，dev 默认值可直接跑）。"""
+import os
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _load_dynamic_env_keys() -> None:
+    """pydantic-settings 只把 .env 中「已声明字段」载入 Settings；
+    DIFY_API_KEY_APP_<id> 是动态键（app/dify/client.py 经 os.environ 读取），
+    这里手动注入，保证 .env 与真实环境变量行为一致。"""
+    env_file = Path(__file__).resolve().parents[2] / ".env"  # backend/.env
+    if not env_file.exists():
+        return
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line.startswith("DIFY_API_KEY_APP_") and "=" in line and not line.startswith("#"):
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip())
 
 
 class Settings(BaseSettings):
@@ -46,3 +62,6 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+
+
+_load_dynamic_env_keys()

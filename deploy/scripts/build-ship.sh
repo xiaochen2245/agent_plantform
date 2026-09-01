@@ -11,6 +11,7 @@ set -euo pipefail
 
 REMOTE_HOST="${REMOTE_HOST:-root@192.168.20.226}"
 TAG="${1:-latest}"
+# 可选：BUILD_ARGS="--network=host --build-arg HTTPS_PROXY=..." 供受限网络构建
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SHA="$(git -C "$REPO_ROOT" rev-parse --short HEAD)"
 
@@ -18,10 +19,10 @@ echo "==> repo: $REPO_ROOT (sha $SHA)"
 echo "==> remote: $REMOTE_HOST   tag: $TAG"
 
 echo "==> building agent-platform-backend:$TAG"
-docker build -t "agent-platform-backend:$TAG" -t "agent-platform-backend:$SHA" "$REPO_ROOT/backend"
+docker build ${BUILD_ARGS:-} -t "agent-platform-backend:$TAG" -t "agent-platform-backend:$SHA" "$REPO_ROOT/backend"
 
 echo "==> building agent-platform-frontend:$TAG"
-docker build -t "agent-platform-frontend:$TAG" -t "agent-platform-frontend:$SHA" "$REPO_ROOT/frontend"
+docker build ${BUILD_ARGS:-} -t "agent-platform-frontend:$TAG" -t "agent-platform-frontend:$SHA" "$REPO_ROOT/frontend"
 
 echo "==> shipping images to $REMOTE_HOST (docker save | ssh docker load)"
 docker save "agent-platform-backend:$TAG" "agent-platform-frontend:$TAG" \

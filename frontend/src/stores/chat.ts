@@ -20,6 +20,8 @@ interface ChatState {
   streaming: boolean;
 
   loadApps: () => Promise<void>;
+  loadConversations: (appId: number) => Promise<ConversationSummary[]>;
+  resumeConversation: (appId: number, conversationId: string) => void;
   setActiveApp: (appId: number) => void;
   messagesOfActive: () => ChatMessage[];
   activeApp: () => AppInfo | null;
@@ -51,6 +53,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } finally {
       set({ appsLoading: false });
     }
+  },
+
+  async loadConversations(appId) {
+    const data = (await http.get<{ items: ConversationSummary[] }>("/conversations", { params: { app_id: appId } })).data;
+    const remote = data.items ?? [];
+    // 远端为真相源，但本地新建会话（后端尚未落库/刷新前）保留在前
+    set((s) => {
+      const local = s.conversationsByApp[String(appId)] ?? [];
+      const localOnly = local.filter((c) => !remote.some((r) => r.id === c.id));
+      return { conversationsByApp: { ...s.conversationsByApp, [String(appId)]: [...localOnly, ...remote] } };
+    });
+    return get().conversationsByApp[String(appId)] ?? [];
+  },
+
+  resumeConversation(appId, conversationId) {
+    set({ activeAppId: appId, activeConversationId: conversationId });
   },
 
   setActiveApp(appId) {

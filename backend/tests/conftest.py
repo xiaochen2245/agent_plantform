@@ -20,14 +20,20 @@ from app.main import app  # noqa: E402
 
 @pytest.fixture(autouse=True)
 async def fresh_db():
-    """每个测试前重建表+种子，隔离状态。"""
+    """每个测试前重建表+种子（含 3 个 Agent），隔离状态。"""
     await init_db(drop=True)
     yield
+    app.dependency_overrides.clear()
 
 
 @pytest.fixture
 async def client() -> AsyncClient:
-    # ASGITransport 不跑 lifespan，fresh_db 已覆盖初始化
+    # ASGITransport 不跑 lifespan，fresh_db 已覆盖初始化；dify 由测试 override
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
+
+
+async def login(c: AsyncClient, email: str = "admin@company.com", password: str = "admin123") -> None:
+    resp = await c.post("/api/auth/login", json={"email": email, "password": password})
+    assert resp.status_code == 200

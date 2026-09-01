@@ -5,18 +5,24 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.apps.router import router as apps_router
 from app.auth.router import router as auth_router
+from app.chat.router import router as chat_router
 from app.core.config import settings
 from app.core.middleware import CSRFMiddleware
+from app.conversations.router import router as conversations_router
 from app.db.init import dispose_engine, init_db
+from app.dify.client import DifyClient
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await init_db()
+    app.state.dify = DifyClient()  # 进程级单例（设计 §13.1）
     try:
         yield
     finally:
+        await app.state.dify.aclose()
         await dispose_engine()
 
 
@@ -35,6 +41,9 @@ if settings.DEBUG:
 app.add_middleware(CSRFMiddleware)
 
 app.include_router(auth_router)
+app.include_router(apps_router)
+app.include_router(chat_router)
+app.include_router(conversations_router)
 
 
 @app.get("/api/health")

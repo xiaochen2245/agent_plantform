@@ -79,3 +79,21 @@
   - 上游 error → `error`（契约形状）
   - 结束仍追加自有 `agent_done`
 - workflow 模式无 Dify 会话概念：dify_conversation_id 置空；我方 conversation 照常创建/复用（title 取首个 inputs 值或 query 前 20 字）
+
+---
+
+# v4 增补（wave5 · orchestrator 批准 · 文件上传）
+
+## 上传
+- POST /api/chat/files（需登录+CSRF，multipart/form-data，字段 file）→ 201
+  `{"file_id":"f_01H...","name":"报告.pdf","size":1048576,"mime":"application/pdf"}`
+- 前置校验（前端+后端双重）：大小 ≤ 20MB（超限 413）；MIME 白名单：
+  application/pdf, application/vnd.openxmlformats-officedocument.wordprocessingml.document,
+  text/plain, text/markdown, image/png, image/jpeg（非法 400 `{"detail":"unsupported file type"}`）
+
+## 消息携带附件
+- chat/send 请求体新增 `"files":["f_01H..."]`（可选数组，chat/agent 模式有效；workflow 模式暂不 attachment）
+- AppOut 无变化；conversations/{id}/messages 的 message 新增 `"files":[{"file_id","name","size","mime"}]`（可空数组）
+
+## 后端语义（wave6 实现声明）
+- 校验通过后转存（MVP 本地卷）并同步上传 Dify /files/upload 换取 dify_file_id；消息发送时作为 inputs 附件变量传给 chat-messages

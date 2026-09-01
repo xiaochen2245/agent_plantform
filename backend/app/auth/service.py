@@ -11,6 +11,7 @@ from app.core.security import (
     hash_refresh_token,
     verify_password,
 )
+from app.authz import role_codes
 from app.models.refresh_token import RefreshToken
 from app.models.user import User
 
@@ -25,8 +26,8 @@ async def authenticate(session: AsyncSession, email: str, password: str) -> User
 
 
 async def issue_tokens(session: AsyncSession, user: User) -> tuple[str, str]:
-    """签发 (access_jwt, raw_refresh)。refresh 哈希入库。"""
-    roles = user.roles or ["USER"]
+    """签发 (access_jwt, raw_refresh)。refresh 哈希入库；roles 取自 user_roles。"""
+    roles = await role_codes(session, user)
     access = create_access_token(user_id=user.id, roles=roles, dept_id=user.dept_id)
     raw_refresh, token_hash = create_refresh_token()
     session.add(

@@ -9,6 +9,7 @@ from app.auth.service import (
     revoke_refresh,
     rotate_refresh,
 )
+from app.authz import role_codes
 from app.core.config import settings
 from app.db.session import get_db
 from app.models.user import User
@@ -81,11 +82,13 @@ async def logout(request: Request, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/me", response_model=MeResponse)
-async def me(user: User = Depends(current_user)):
+async def me(
+    user: User = Depends(current_user), db: AsyncSession = Depends(get_db)
+):
     return MeResponse(
         id=user.id,
         email=user.email,
         name=user.name,
-        roles=user.roles or ["USER"],
+        roles=await role_codes(db, user),
         dept_id=user.dept_id,
     )

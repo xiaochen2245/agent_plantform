@@ -1,5 +1,5 @@
 import { http as mswHttp, HttpResponse } from "msw";
-import type { AppInfo, ConversationSummary, MeInfo } from "../types";
+import type { AppInfo, ConversationSummary, MeInfo, UploadedFile } from "../types";
 
 /**
  * 契约 mock 实现（docs/api-contract.md）。
@@ -77,9 +77,19 @@ const CONVERSATIONS: ConversationSummary[] = [
 ];
 
 /* ── 会话消息详情：契约 v2 已入约（GET /api/conversations/{id}/messages）── */
-const CONVERSATION_MESSAGES: Record<string, Array<{ id: number; role: "user" | "assistant"; content: string; created_at: string }>> = {
+const CONVERSATION_MESSAGES: Record<string, Array<{ id: number; role: "user" | "assistant"; content: string; created_at: string; files?: UploadedFile[] | null }>> = {
   "11111111-1111-1111-1111-111111111111": [
-    { id: 1, role: "user", content: "VPN 连接失败怎么办", created_at: new Date().toISOString() },
+    {
+      id: 1,
+      role: "user",
+      content: "VPN 连接失败怎么办",
+      created_at: new Date().toISOString(),
+      // 契约 v4：附件随消息带回（回放展示用示例）
+      files: [
+        { file_id: "f_mock_vpn_log", name: "vpn-错误日志.txt", size: 2048, mime: "text/plain" },
+        { file_id: "f_mock_screenshot", name: "报错截图.png", size: 153600, mime: "image/png" },
+      ],
+    },
     {
       id: 2,
       role: "assistant",
@@ -106,6 +116,44 @@ function authCookiePairs(): [string, string][] {
 }
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** 上传文件 mock 计数器（确定性 file_id，便于测试断言） */
+let mockFileSeq = 0;
+
+/** 极简 multipart 解析（仅取第一个 file 字段的 filename/content-type/字节长度）。
+ * 不用 request.formData()：jsdom 环境下 undici 的 formData 解析器与
+ * 手编码/跨 realm 字节流存在兼容问题；mock 只需 name/size/type，自解析足够。
+ */
+function parseMultipartFile(contentType: string, body: ArrayBuffer): { name: string; type: string; size: number } | null {
+  const m = /boundary=(.+)$/.exec(contentType.trim());
+  if (!m) return null;
+  const boundary = `--${m[1].trim()}`;
+  const bytes = new Uint8Array(body);
+  const decoder = new TextDecoder("utf-8", { fatal: false });
+  // 头部可能含中文文件名（多字节），全部定位按字节进行，仅头部切片解码为文本
+  const headerEnd = utf8IndexOf(bytes, "\r\n\r\n", 0);
+  if (headerEnd === -1 || utf8IndexOf(bytes, boundary, 0) === -1) return null;
+  const headers = decoder.decode(bytes.subarray(0, headerEnd));
+  const nameMatch = /filename="([^"]*)"/.exec(headers);
+  const typeMatch = /content-type:\s*([^\r\n]+)/i.exec(headers);
+  const contentStart = headerEnd + 4;
+  const endBytes = utf8IndexOf(bytes, `${boundary}--`, contentStart);
+  if (endBytes === -1) return null;
+  const size = Math.max(0, endBytes - contentStart - 2); // 末尾 \r\n 不计入
+  return { name: nameMatch?.[1] ?? "file", type: (typeMatch?.[1] ?? "application/octet-stream").trim(), size };
+}
+
+function utf8IndexOf(haystack: Uint8Array, needle: string, from: number): number {
+  const needleBytes = new TextEncoder().encode(needle);
+  outer: for (let i = from; i <= haystack.length - needleBytes.length; i++) {
+    for (let j = 0; j < needleBytes.length; j++) if (haystack[i + j] !== needleBytes[j]) continue outer;
+    return i;
+  }
+  return -1;
+}
+
+/** chat/send 捕获的最近一次请求体（附件断言用：测试读 lastChatSendBody）。 */
+export let lastChatSendBody: { query?: string; inputs?: Record<string, string>; files?: string[] } | null = null;
 
 /** 模拟 AI 回答：按段切分为流式增量。 */
 function mockAnswer(query: string): string[] {
@@ -176,8 +224,43 @@ export const handlers = [
     return HttpResponse.json({ messages });
   }),
 
+  // 附件上传（契约 v4）：与后端同等校验（20MB / MIME 白名单）
+  mswHttp.post("/api/chat/files", async ({ request }) => {
+    const parsed = parseMultipartFile(request.headers.get("content-type") ?? "", await request.arrayBuffer());
+    if (!parsed || !parsed.name) {
+      return HttpResponse.json({ detail: "file field is required" }, { status: 400 });
+    }
+    const { name, type, size } = parsed;
+    if (size > 20 * 1024 * 1024) {
+      return HttpResponse.json({ detail: "file exceeds 20MB limit" }, { status: 413 });
+    }
+    const allowed = [
+      "application/pdf",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "text/plain",
+      "text/markdown",
+      "image/png",
+      "image/jpeg",
+    ];
+    const lower = name.toLowerCase();
+    const extAllowed = lower.endsWith(".txt") || lower.endsWith(".md");
+    if (!extAllowed && !allowed.includes(type)) {
+      return HttpResponse.json({ detail: "unsupported file type" }, { status: 400 });
+    }
+    mockFileSeq += 1;
+    const uploaded: UploadedFile = {
+      file_id: `f_mock_${mockFileSeq}`,
+      name,
+      size,
+      mime: type || "text/plain",
+    };
+    await delay(50);
+    return HttpResponse.json(uploaded, { status: 201 });
+  }),
+
   mswHttp.post("/api/chat/send", async ({ request }) => {
-    const body = (await request.json()) as { query?: string; inputs?: Record<string, string> };
+    const body = (await request.json()) as { query?: string; inputs?: Record<string, string>; files?: string[] };
+    lastChatSendBody = body;
     const query = body.query ?? "";
     const encoder = new TextEncoder();
 
@@ -202,6 +285,11 @@ export const handlers = [
           for (const seg of mockAnswer(query)) {
             send("message", { answer: seg });
             await delay(80);
+          }
+          if (body.files && body.files.length > 0) {
+            // 契约 v4：附件已随消息送达（mock 回执提一句，便于联调观察）
+            send("message", { answer: `（已收到 ${body.files.length} 个附件）\n` });
+            await delay(60);
           }
           send("message_end", { metadata: { usage: { total: 128 } } });
           send("agent_done", {});

@@ -25,6 +25,7 @@ function toChatMessage(m: ConversationMessage): ChatMessage {
     role: m.role,
     content: m.content,
     status: "done",
+    files: m.files ?? null, // 契约 v4：附件随回放带出
     createdAt: dayjs(m.created_at).valueOf(),
   };
 }

@@ -707,3 +707,70 @@ body {
   padding: 12px 24px 24px;
   background: transparent;
 }
+
+/* ── 附件 chip（契约 v4）：composer 待发送 + 消息内只读 ─────────── */
+
+.attach-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--mist, #f8fafc);
+  font-size: 12px;
+  color: var(--ink);
+  line-height: 20px;
+}
+
+.attach-chip .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attach-chip .size {
+  color: var(--text-muted);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.attach-chip .remove {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.attach-chip .remove:hover {
+  color: #dc2626;
+}
+
+/* 消息气泡内的只读附件（无移除按钮，白底融入气泡） */
+.msg-files {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.msg-files .attach-chip.readonly {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.28);
+  color: #fff;
+}
+
+.msg-files .attach-chip.readonly .size {
+  color: rgba(255, 255, 255, 0.75);
+}

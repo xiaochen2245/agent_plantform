@@ -12,6 +12,9 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 
 COPY app ./app
+# 迁移体系必须随镜像（启动引导 alembic upgrade head；缺此两行＝生产无法 ALTER 表）
+COPY alembic.ini ./
+COPY alembic ./alembic
 ENV PATH="/app/.venv/bin:$PATH"
 
 EXPOSE 8000

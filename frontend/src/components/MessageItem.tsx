@@ -1,6 +1,7 @@
-import { LockFilled, WarningFilled } from "@ant-design/icons";
+import { FileImageOutlined, FileMarkdownOutlined, FilePdfOutlined, FileTextOutlined, FileWordOutlined, LockFilled, PaperClipOutlined, WarningFilled } from "@ant-design/icons";
 import { Button } from "antd";
-import type { ChatMessage } from "../types";
+import { fileKindOf, formatFileSize } from "../utils/files";
+import type { ChatMessage, UploadedFile } from "../types";
 
 interface MessageItemProps {
   message: ChatMessage;
@@ -8,10 +9,43 @@ interface MessageItemProps {
   streaming: boolean;
 }
 
+const KIND_ICONS = {
+  pdf: FilePdfOutlined,
+  word: FileWordOutlined,
+  text: FileTextOutlined,
+  markdown: FileMarkdownOutlined,
+  image: FileImageOutlined,
+  generic: PaperClipOutlined,
+} as const;
+
+/** user 消息附件列表（契约 v4）：图标按 mime 映射 + 名称 + 大小。 */
+function AttachmentList({ files }: { files: UploadedFile[] }) {
+  return (
+    <div className="msg-files">
+      {files.map((f) => {
+        const meta = fileKindOf(f.mime);
+        const Icon = KIND_ICONS[meta.kind];
+        return (
+          <span className="attach-chip readonly" key={f.file_id} data-kind={meta.kind}>
+            <Icon style={{ color: meta.color }} />
+            <span className="name" title={f.name}>{f.name}</span>
+            <span className="size">{formatFileSize(f.size)}</span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 /** 单条消息：用户=右侧青色气泡；AI=全宽文档式排版（设计稿约定）。 */
 export default function MessageItem({ message, onRetry, streaming }: MessageItemProps) {
   if (message.role === "user") {
-    return <div className="msg-user">{message.content}</div>;
+    return (
+      <div className="msg-user">
+        {message.content}
+        {message.files && message.files.length > 0 && <AttachmentList files={message.files} />}
+      </div>
+    );
   }
 
   if (message.status === "error") {

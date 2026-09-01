@@ -1,8 +1,9 @@
 import { http } from "./http";
-import type { ConversationSummary } from "../types";
+import type { ConversationSummary, UploadedFile } from "../types";
 
 /** 会话详情消息（回放用）。
  * 契约 v2：GET /api/conversations/{id}/messages → {"messages":[...]}（按 created_at asc）。
+ * 契约 v4：user 消息可携带 files 元数据（可空）。
  */
 
 export interface ConversationMessage {
@@ -10,6 +11,7 @@ export interface ConversationMessage {
   role: "user" | "assistant";
   content: string;
   created_at: string;
+  files?: UploadedFile[] | null;
 }
 
 export async function fetchConversations(appId: number): Promise<ConversationSummary[]> {

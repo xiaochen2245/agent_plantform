@@ -109,7 +109,7 @@ export default function Chat() {
         <Composer
           disabled={!activeApp}
           streaming={streaming}
-          onSend={(q) => void sendMessage(q)}
+          onSend={(q, files) => void sendMessage(q, undefined, files)}
           onStop={stopStreaming}
         />
       )}

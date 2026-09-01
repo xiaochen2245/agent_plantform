@@ -36,6 +36,14 @@ export type MessageStatus = "done" | "streaming" | "error";
 /** 错误分类：unauthorized=403 未授权（重试无意义）；generic=生成失败/网络错误。 */
 export type MessageErrorKind = "unauthorized" | "generic";
 
+/** 上传附件（契约 v4）：上传端点返回体，也是消息携带的 files 元素形状。 */
+export interface UploadedFile {
+  file_id: string;
+  name: string;
+  size: number;
+  mime: string;
+}
+
 export interface ChatMessage {
   id: string;
   conversationId: string;
@@ -44,6 +52,8 @@ export interface ChatMessage {
   status: MessageStatus;
   errorKind?: MessageErrorKind;
   usage?: { total: number };
+  /** 契约 v4：user 消息可携带附件（可空） */
+  files?: UploadedFile[] | null;
   createdAt: number;
 }
 
@@ -60,4 +70,6 @@ export interface ChatSendRequest {
   conversation_id: string;
   /** 契约 v3：workflow 应用变量透传 */
   inputs?: Record<string, string>;
+  /** 契约 v4：附件 file_id 列表（chat/agent 模式有效） */
+  files?: string[];
 }

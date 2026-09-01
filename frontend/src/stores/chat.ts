@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { http } from "../api/http";
 import { sendChatStream } from "../api/sse";
-import type { AppInfo, ChatMessage, ConversationSummary } from "../types";
+import type { AppInfo, ChatMessage, ConversationSummary, UploadedFile } from "../types";
 let seq = 0;
 function nextId(prefix: string): string {
   seq += 1;
@@ -24,14 +24,15 @@ interface ChatState {
   setActiveApp: (appId: number) => void;
   messagesOfActive: () => ChatMessage[];
   activeApp: () => AppInfo | null;
-  sendMessage: (query: string, inputs?: Record<string, string>) => Promise<void>;
+  sendMessage: (query: string, inputs?: Record<string, string>, files?: UploadedFile[]) => Promise<void>;
   retryLast: () => Promise<void>;
   stopStreaming: () => void;
 }
 
 let abortController: AbortController | null = null;
-/** 最近一次发送的 workflow inputs：重试时保真（chat 应用无 inputs） */
+/** 最近一次发送的 workflow inputs / 附件：重试时保真 */
 let lastInputs: Record<string, string> | undefined;
+let lastFiles: UploadedFile[] | undefined;
 
 export const useChatStore = create<ChatState>((set, get) => ({
   apps: [],
@@ -86,11 +87,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     return activeConversationId ? messagesByConv[activeConversationId] ?? [] : [];
   },
 
-  async sendMessage(query, inputs) {
+  async sendMessage(query, inputs, files) {
     const state = get();
     const app = state.activeApp();
     if (!app || state.streaming || !query.trim()) return;
     lastInputs = inputs;
+    lastFiles = files && files.length > 0 ? files : undefined;
 
     // 无活跃会话时开启新会话（标题取首条问题）
     let conversationId = state.activeConversationId;
@@ -105,6 +107,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       role: "user",
       content: query.trim(),
       status: "done",
+      files: files && files.length > 0 ? files : null,
       createdAt: Date.now(),
     };
     const assistantMsg: ChatMessage = {
@@ -157,7 +160,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     };
 
     await sendChatStream(
-      { app_id: app.id, query: query.trim(), conversation_id: conversationId, inputs },
+      { app_id: app.id, query: query.trim(), conversation_id: conversationId, inputs, files: lastFiles?.map((f) => f.file_id) },
       {
         onMessage: (delta) => {
           const current = get().messagesByConv[conversationId as string] ?? [];
@@ -197,7 +200,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ),
       },
     }));
-    await get().sendMessage(lastUser.content, lastInputs);
+    await get().sendMessage(lastUser.content, lastInputs, lastFiles);
   },
 
   stopStreaming() {

@@ -24,8 +24,6 @@ GIT_SHA="$(git -C "$REPO_ROOT" rev-parse --short HEAD)"
 echo "==> build on server (GIT_SHA=$GIT_SHA)"
 ssh "$REMOTE_HOST" "cd '$SRC_DIR' && git checkout -q develop && git reset -q --hard refs/heads/develop && \
   GIT_SHA='$GIT_SHA' docker compose -f deploy/docker-compose.yml build"
-ssh "$REMOTE_HOST" "cd '$SRC_DIR' && git checkout -q develop && git reset -q --hard refs/heads/develop && \
-  docker compose -f deploy/docker-compose.yml build"
 
 echo "==> up (run dir)"
 ssh "$REMOTE_HOST" "cd '$RUN_DIR' && docker compose up -d"

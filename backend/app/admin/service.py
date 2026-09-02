@@ -76,6 +76,7 @@ async def list_users(
     session: AsyncSession,
     query: str | None = None,
     status: int | None = None,
+    dept_id: int | None = None,
     page: int = 1,
     page_size: int = 20,
 ) -> tuple[int, list[dict]]:
@@ -89,6 +90,9 @@ async def list_users(
     if status is not None:
         stmt = stmt.where(User.status == status)
         count_stmt = count_stmt.where(User.status == status)
+    if dept_id is not None:  # 部门成员视图（部门页详情）
+        stmt = stmt.where(User.dept_id == dept_id)
+        count_stmt = count_stmt.where(User.dept_id == dept_id)
 
     total = await session.scalar(count_stmt) or 0
     page = max(1, page)

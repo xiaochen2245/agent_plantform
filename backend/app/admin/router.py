@@ -27,12 +27,13 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 async def list_users(
     query: str | None = None,
     status: int | None = None,
+    dept_id: int | None = None,
     page: int = 1,
     page_size: int = 20,
     _admin: User = Depends(require_platform_admin),
     db: AsyncSession = Depends(get_db),
 ) -> AdminUsersResponse:
-    total, items = await service.list_users(db, query, status, page, page_size)
+    total, items = await service.list_users(db, query, status, dept_id, page, page_size)
     return AdminUsersResponse(total=total, items=items)  # type: ignore[arg-type]
 
 

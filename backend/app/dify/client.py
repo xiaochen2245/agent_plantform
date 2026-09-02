@@ -8,6 +8,7 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import anyio
 import httpx
 
 from app.core.config import settings
@@ -48,7 +49,10 @@ class DifyClient:
         try:
             yield response
         finally:
-            await response.aclose()
+            # 客户端断开时（starlette cancel_scope.cancel()）外层已处于取消 scope：
+            # 不加 shield，这里的 await 会被立即跳过 → 响应体泄漏、连接不归还池
+            with anyio.CancelScope(shield=True):
+                await response.aclose()
 
     @asynccontextmanager
     async def stream_workflow(self, app_id: int, payload: dict) -> AsyncIterator[httpx.Response]:
@@ -63,7 +67,9 @@ class DifyClient:
         try:
             yield response
         finally:
-            await response.aclose()
+            # 同 stream_chat：shield 保证取消路径下连接关闭
+            with anyio.CancelScope(shield=True):
+                await response.aclose()
 
     async def upload_file(
         self, app_id: int, filename: str, content: bytes, mime: str

@@ -3,13 +3,17 @@
 关键语义：
 - 逐行转发 Dify 原文（含空行分隔符），前端看到的事件形态与 Dify 一致
 - event=message 累加 answer；message_end 取 metadata.usage 存 token_usage
-- finally 块独立会话落库：客户端断流（GeneratorExit）也保证已生成内容入库
+- finally 块独立会话落库：客户端断流也保证已生成内容入库。断开有两种注入方式
+  （GeneratorExit / starlette 的 cancel_scope.cancel()），后者使已取消 scope 内的
+  首个 await 被立即跳过 —— 故落库 await 必须置于 anyio shield 内（_shield_persist）
 - agent_done 只在终端路径（正常/超时/错误）追加；断流路径禁止 yield（GeneratorExit 后再 yield 会 RuntimeError）
 """
 import json
+import re
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 
+import anyio
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -25,6 +29,19 @@ _WORKFLOW_DROP_EVENTS = {"ping", "workflow_started", "node_started", "node_finis
 
 # 契约 v6：上游思考内容的可能字段（按优先级探测）
 _REASONING_FIELDS = ("reasoning_content", "reasoning", "thought")
+
+# B2：上游错误摘要 —— 剥 URL、丢超长堆栈行，防内部拓扑（节点名/内网地址/供应商串）泄露给前端
+_URL_RE = re.compile(r"https?://\S+")
+_ERROR_SUMMARY_LIMIT = 200
+_ERROR_LINE_MAX = 120
+
+
+def _summarize_upstream_error(raw: str) -> str:
+    """上游错误白名单式精简：保留短行、剥 URL、截断；空输入回退固定文案。"""
+    text = _URL_RE.sub("[url]", raw or "").strip()
+    kept = [ln.strip() for ln in text.splitlines() if ln.strip() and len(ln) <= _ERROR_LINE_MAX]
+    summary = " ".join(kept) if kept else text
+    return (summary[:_ERROR_SUMMARY_LIMIT] or "workflow failed").strip()
 
 
 def _extract_reasoning(data: dict) -> str:
@@ -70,6 +87,26 @@ async def _persist_assistant(
             conv.dify_conversation_id = dify_conversation_id
         conv.updated_at = datetime.now(timezone.utc)
         await session.commit()
+
+
+async def _shield_persist(
+    conversation_id,
+    accumulated: str,
+    token_usage: dict | None,
+    dify_conversation_id: str | None,
+    reasoning: str = "",
+) -> None:
+    """落库穿透取消：starlette 客户端断开 = cancel_scope.cancel()，已取消 scope
+    内首个 await 会被立即跳过 —— shield 是唯一可靠穿透手段（B1 审查修复）。"""
+    with anyio.CancelScope(shield=True):
+        await _persist_assistant(
+            SessionLocal,
+            conversation_id,
+            accumulated,
+            token_usage,
+            dify_conversation_id,
+            reasoning,
+        )
 
 
 async def stream_dify_events(
@@ -162,9 +199,8 @@ async def stream_dify_events(
         yield _sse("error", {"message": "Proxy error"})
         terminal = True
     finally:
-        # 客户端断流（GeneratorExit）也会走到这里 —— 唯一的落库保证点
-        await _persist_assistant(
-            SessionLocal,
+        # 客户端断流（GeneratorExit / starlette cancel）也会走到这里 —— 唯一的落库保证点
+        await _shield_persist(
             conversation.id,
             accumulated,
             token_usage,
@@ -238,9 +274,13 @@ async def stream_workflow_events(
                     elif ev == "workflow_finished":
                         finish = data.get("data") or {}
                         if finish.get("status") == "failed":
+                            # B2：原文经摘要精简后再透传（防节点名/内网 URL/堆栈泄露）
                             yield _sse(
                                 "error",
-                                {"message": str(finish.get("error") or "workflow failed")},
+                                {
+                                    "message": "上游工作流执行失败: "
+                                    + _summarize_upstream_error(str(finish.get("error") or ""))
+                                },
                             )
                         else:
                             total = int(finish.get("total_tokens") or 0)
@@ -256,9 +296,8 @@ async def stream_workflow_events(
         yield _sse("error", {"message": "Proxy error"})
         terminal = True
     finally:
-        # 工作流无 Dify 会话概念：dify_conversation_id 恒 None
-        await _persist_assistant(
-            SessionLocal,
+        # 工作流无 Dify 会话概念：dify_conversation_id 恒 None；shield 语义同 chat 分支
+        await _shield_persist(
             conversation.id,
             accumulated,
             token_usage,

@@ -77,6 +77,41 @@ const CONVERSATIONS: ConversationSummary[] = [
 ];
 
 /* ── 会话消息详情：契约 v2 已入约（GET /api/conversations/{id}/messages）── */
+
+/** 动态会话存储：chat/send 新建的会话登记于此（reload 恢复 / 多轮串联 e2e 依赖，对齐契约 v5/v2） */
+interface DynMessage {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+  files?: UploadedFile[] | null;
+  reasoning?: string | null;
+}
+const dynamicConvs = new Map<string, { appId: number; summary: ConversationSummary; messages: DynMessage[] }>();
+let dynMsgSeq = 1000;
+let dynConvSeq = 0;
+
+/** 动态会话持久化（mock 模式）：页面 reload 会重建 JS 上下文，恢复链路（F3）依赖会话数据存活 */
+const DYN_LS_KEY = "mock_dyn_convs";
+function persistDyn() {
+  try {
+    globalThis.localStorage?.setItem(DYN_LS_KEY, JSON.stringify([...dynamicConvs.values()]));
+  } catch {
+    /* 存储不可用（node 环境）则跳过 */
+  }
+}
+function restoreDyn() {
+  if (dynamicConvs.size > 0) return;
+  try {
+    const raw = globalThis.localStorage?.getItem(DYN_LS_KEY);
+    if (!raw) return;
+    for (const c of JSON.parse(raw) as Array<{ appId: number; summary: ConversationSummary; messages: DynMessage[] }>) {
+      dynamicConvs.set(c.summary.id, c);
+    }
+  } catch {
+    /* 解析失败忽略 */
+  }
+}
 const CONVERSATION_MESSAGES: Record<string, Array<{ id: number; role: "user" | "assistant"; content: string; created_at: string; files?: UploadedFile[] | null }>> = {
   "11111111-1111-1111-1111-111111111111": [
     {
@@ -213,12 +248,21 @@ export const handlers = [
 
   mswHttp.get("/api/conversations", ({ request }) => {
     const appId = new URL(request.url).searchParams.get("app_id") ?? "1";
-    return HttpResponse.json({ items: CONVERSATIONS.filter(() => appId === "1") });
+    // 动态（本页新建，最新在前）+ 静态种子，仅 app 1（与原语义一致）
+    restoreDyn();
+    const items =
+      appId === "1"
+        ? [...dynamicConvs.values()].map((c) => c.summary).concat(CONVERSATIONS)
+        : [];
+    return HttpResponse.json({ items });
   }),
 
   // 会话消息详情（契约 v2）
   mswHttp.get("/api/conversations/:id/messages", ({ params }) => {
     const id = String(params.id);
+    restoreDyn();
+    const dyn = dynamicConvs.get(id);
+    if (dyn) return HttpResponse.json({ messages: dyn.messages });
     const messages = CONVERSATION_MESSAGES[id];
     if (!messages) return HttpResponse.json({ detail: "Not found" }, { status: 404 });
     return HttpResponse.json({ messages });
@@ -259,10 +303,43 @@ export const handlers = [
   }),
 
   mswHttp.post("/api/chat/send", async ({ request }) => {
-    const body = (await request.json()) as { query?: string; inputs?: Record<string, string>; files?: string[] };
+    const body = (await request.json()) as {
+      query?: string;
+      inputs?: Record<string, string>;
+      files?: string[];
+      conversation_id?: string;
+    };
     lastChatSendBody = body;
     const query = body.query ?? "";
     const encoder = new TextEncoder();
+
+    // 契约 v5：会话 id 语义 —— 非空且已知则续用（多轮串联），否则新建并登记
+    const convId =
+      body.conversation_id && dynamicConvs.has(body.conversation_id)
+        ? body.conversation_id
+        : `dyn-conv-${Date.now()}-${++dynConvSeq}`;
+    let conv = dynamicConvs.get(convId);
+    if (!conv) {
+      conv = {
+        appId: 1,
+        summary: {
+          id: convId,
+          title: (query || Object.values(body.inputs ?? {}).join(" ")).slice(0, 20),
+          message_count: 0,
+          updated_at: new Date().toISOString(),
+        },
+        messages: [],
+      };
+      dynamicConvs.set(convId, conv);
+    }
+    conv.messages.push({
+      id: ++dynMsgSeq,
+      role: "user",
+      content: query || JSON.stringify(body.inputs ?? {}),
+      created_at: new Date().toISOString(),
+    });
+    persistDyn();
+    let acc = ""; // 累计 assistant 全文，message_end 时落动态会话（回放/恢复用）
 
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
@@ -273,28 +350,44 @@ export const handlers = [
           if (body.inputs && Object.keys(body.inputs).length > 0) {
             // 契约 v3：workflow 应用按表单生成（mock 简单返回）
             send("message", { answer: "已按表单内容生成结果：" });
+            acc += "已按表单内容生成结果：";
             await delay(80);
             send("message", { answer: query });
+            acc += query;
             await delay(80);
           } else if (query.includes("失败")) {
             await delay(300);
             send("error", { message: "回答生成失败，请重试" });
-            // 对齐真机行为：错误后仍发 agent_done（前端 A3 靠它判错误态保留）
-            send("agent_done", {});
+            // 对齐真机行为：错误后仍发 agent_done（A3 错误态保留；v5 带 conversation_id）
+            conv.summary.message_count = conv.messages.length;
+            persistDyn();
+            send("agent_done", { conversation_id: convId });
             controller.close();
             return;
           }
           for (const seg of mockAnswer(query)) {
             send("message", { answer: seg });
+            acc += seg;
             await delay(80);
           }
           if (body.files && body.files.length > 0) {
             // 契约 v4：附件已随消息送达（mock 回执提一句，便于联调观察）
-            send("message", { answer: `（已收到 ${body.files.length} 个附件）\n` });
+            const receipt = `（已收到 ${body.files.length} 个附件）\n`;
+            send("message", { answer: receipt });
+            acc += receipt;
             await delay(60);
           }
           send("message_end", { metadata: { usage: { total: 128 } } });
-          send("agent_done", {});
+          conv.messages.push({
+            id: ++dynMsgSeq,
+            role: "assistant",
+            content: acc,
+            created_at: new Date().toISOString(),
+          });
+          conv.summary.message_count = conv.messages.length;
+          conv.summary.updated_at = new Date().toISOString();
+          persistDyn();
+          send("agent_done", { conversation_id: convId });
           controller.close();
         } catch {
           controller.error(new Error("mock stream aborted"));

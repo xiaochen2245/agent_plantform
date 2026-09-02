@@ -24,6 +24,8 @@ interface ChatState {
   loadApps: () => Promise<void>;
   loadConversations: (appId: number) => Promise<ConversationSummary[]>;
   resumeConversation: (appId: number, conversationId: string) => void;
+  /** F3：恢复该应用最近一次会话（拉详情灌桶并激活）；无会话返回 false */
+  resumeLatest: (appId: number) => Promise<boolean>;
   setActiveApp: (appId: number) => void;
   messagesOfActive: () => ChatMessage[];
   activeApp: () => AppInfo | null;
@@ -76,6 +78,46 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ activeAppId: appId, activeConversationId: conversationId });
   },
 
+  async resumeLatest(appId) {
+    // 容错语义：恢复失败（网络/后端抖动）＝不恢复，绝不阻断对话页
+    try {
+      // 直接取远端列表（避免与本地摘要合并噪声），最新在前（后端按 updated_at desc）
+      const data = (
+        await http.get<{ items: ConversationSummary[] }>("/conversations", { params: { app_id: appId } })
+      ).data;
+      const latest = (data.items ?? [])[0];
+      if (!latest) return false;
+      const detail = (
+        await http.get<{ messages: Array<{
+          id: number;
+          role: "user" | "assistant";
+          content: string;
+          created_at: string;
+          files?: UploadedFile[] | null;
+          reasoning?: string | null;
+        }> }>(`/conversations/${latest.id}/messages`)
+      ).data;
+      const msgs: ChatMessage[] = (detail.messages ?? []).map((m) => ({
+        id: `srv-${latest.id}-${m.id}`,
+        conversationId: latest.id,
+        role: m.role,
+        content: m.content,
+        status: "done",
+        files: m.files && m.files.length > 0 ? m.files : null,
+        reasoning: m.reasoning ?? null,
+        createdAt: Date.parse(m.created_at) || Date.now(),
+      }));
+      set((s) => ({
+        activeAppId: appId,
+        activeConversationId: latest.id,
+        messagesByConv: { ...s.messagesByConv, [latest.id]: msgs },
+      }));
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
   setActiveApp(appId) {
     set({ activeAppId: appId, activeConversationId: null });
   },
@@ -124,16 +166,49 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set((s) => ({
         messagesByConv: { ...s.messagesByConv, [conversationId as string]: [...(s.messagesByConv[conversationId as string] ?? []), ...msgs] },
       }));
-    const patchAssistant = (patch: Partial<ChatMessage>) =>
+    // F2：流式增量节流缓冲 —— 逐 token 全量 patch 是 O(n²) 重渲染卡顿根源；
+    // 增量先进缓冲，~80ms 合批刷一次（终态事件强制刷余量）
+    const pending = { delta: "", reasoning: "" };
+    let flushTimer: ReturnType<typeof setInterval> | null = null;
+
+    // adopt 后消息桶会迁移到真实 id 键：按 assistantMsg.id 动态定位桶，避免写孤儿草稿桶
+    const patchAssistant = (
+      patch: Partial<ChatMessage> | ((m: ChatMessage) => Partial<ChatMessage>)
+    ) =>
       set((s) => {
-        const list = s.messagesByConv[conversationId as string] ?? [];
+        const entry = Object.entries(s.messagesByConv).find(([, list]) =>
+          (list as ChatMessage[]).some((m) => m.id === assistantMsg.id)
+        );
+        if (!entry) return {};
+        const [key, list] = entry as [string, ChatMessage[]];
         return {
           messagesByConv: {
             ...s.messagesByConv,
-            [conversationId as string]: list.map((m) => (m.id === assistantMsg.id ? { ...m, ...patch } : m)),
+            [key]: list.map((m) =>
+              m.id === assistantMsg.id ? { ...m, ...(typeof patch === "function" ? patch(m) : patch) } : m
+            ),
           },
         };
       });
+
+    const flushNow = () => {
+      if (!pending.delta && !pending.reasoning) return;
+      const d = pending.delta;
+      const r = pending.reasoning;
+      pending.delta = "";
+      pending.reasoning = "";
+      patchAssistant((m) => ({
+        content: (m.content ?? "") + d,
+        ...(r ? { reasoning: (m.reasoning ?? "") + r } : {}),
+      }));
+    };
+    const stopFlushTimer = () => {
+      if (flushTimer !== null) {
+        clearInterval(flushTimer);
+        flushTimer = null;
+      }
+      flushNow();
+    };
 
     append([userMsg, assistantMsg]);
     set({ streaming: true });
@@ -142,6 +217,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const sendSignal = abortController.signal;
 
     const finish = (realId?: string) => {
+      stopFlushTimer(); // 终态：停节流并刷余量
       abortController = null;
       set({ streaming: false });
       // A8：草稿桶且未拿到真实 id 时不落本地摘要（后端已建会话，列表刷新自然带回）——消灭幽灵会话
@@ -188,18 +264,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
       { app_id: app.id, query: query.trim(), conversation_id: sendConversationId, inputs, files: lastFiles?.map((f) => f.file_id) },
       {
         onMessage: (delta) => {
-          const current = get().messagesByConv[conversationId as string] ?? [];
-          const m = current.find((x) => x.id === assistantMsg.id);
-          patchAssistant({ content: (m?.content ?? "") + delta });
+          pending.delta += delta;
+          if (flushTimer === null) flushTimer = setInterval(flushNow, 80);
         },
         onReasoning: (delta) => {
-          // 契约 v6：思考增量累加，与正文分开累计
-          const current = get().messagesByConv[conversationId as string] ?? [];
-          const m = current.find((x) => x.id === assistantMsg.id);
-          patchAssistant({ reasoning: (m?.reasoning ?? "") + delta });
+          // 契约 v6：思考增量进同一节流缓冲，与正文分开累计
+          pending.reasoning += delta;
+          if (flushTimer === null) flushTimer = setInterval(flushNow, 80);
         },
         onMessageEnd: (usage) => patchAssistant({ usage }),
         onError: (message, kind) => {
+          // 错误卡整体替换内容：丢弃缓冲余量，避免半截正文混入错误文案
+          pending.delta = "";
+          pending.reasoning = "";
           patchAssistant({ status: "error", content: message, errorKind: kind });
         },
         onAgentDone: (data) => {

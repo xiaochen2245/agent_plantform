@@ -326,6 +326,9 @@ body {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  /* F1：缺此行则 .chat-thread 的 overflow-y:auto 永不生效（flex 子项默认 min-height:auto），
+     长会话把 composer 顶出视口且无法下拉 */
+  min-height: 0;
   background: var(--mist);
 }
 
@@ -544,6 +547,8 @@ body {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  /* F1：允许内部线程区滚动收敛（flex 子项默认 min-height:auto 会撑破容器） */
+  min-height: 0;
 }
 
 /* ── 通用页头/居中页 ─────────── */

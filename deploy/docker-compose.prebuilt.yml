@@ -36,6 +36,9 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:-agent_dev_only}@postgres:5432/${POSTGRES_DB:-agent_platform}
     expose:
       - "8000"
+    volumes:
+      # 上传附件持久化（与主 compose 一致）
+      - ap_uploads:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -63,3 +66,5 @@ services:
 
 volumes:
   postgres_data:
+  # 上传附件（backend UPLOAD_DIR=/app/uploads）
+  ap_uploads:

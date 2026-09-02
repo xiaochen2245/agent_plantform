@@ -14,6 +14,8 @@
 
 ```bash
 # ① 生成服务器端 .env（强随机密钥在服务器上生成，绝不入库）
+#    非默认端口用环境变量：PORTAL_PORT=8180 deploy/scripts/remote-env.sh
+#    （ALLOWED_ORIGINS 会自动跟随；COOKIE_SECURE=false 为纯 HTTP 阶段默认）
 deploy/scripts/remote-env.sh
 
 # ② 本机构建两镜像并 ship 到服务器
@@ -57,11 +59,20 @@ docker compose restart backend             # 重启单个服务
 docker compose up -d                       # 应用 .env 修改（重建受影响容器）
 ```
 
+数据卷：`postgres_data`（库）与 `ap_uploads`（上传附件，backend `/app/uploads`）——重部署不丢；回滚/重置时注意卷保留策略。
+
 ## 5. 常见问题
 
 **端口冲突**（`bind: address already in use`）
 - `:8080` 被占：`ss -tlnp | grep 8080` 查占用；或改服务器 `.env` 的 `PORTAL_PORT` 后 `docker compose up -d`
+- ⚠️ **改端口必须同步改 `ALLOWED_ORIGINS`**（CSRF 白名单按 Origin 精确匹配，含端口）。`remote-env.sh` 新生成的 env 已按 `PORTAL_PORT` 自动推导；存量 `.env` 手改端口时需同步：`sed -i "s#:8080#:新端口#" .env`（一条命令同时覆盖 PORTAL_PORT 与 ALLOWED_ORIGINS）
 - 误占 `:80`：说明起错了 compose 项目（Dify 在用），检查是否在 `/root/dify` 之外的位置 up 了带 build 的主 compose
+
+**登录后刷新即被登出 / 登录态无法保持**
+- 纯 HTTP 部署下 `.env` 必须有 `COOKIE_SECURE=false`（浏览器拒收 Secure cookie）。`remote-env.sh` 生成的 env 已包含；TLS 就绪后删除该行恢复默认收紧
+
+**上传大文件返回 nginx 错误页而非 JSON**
+- 不会发生：`portal.conf` 的 `client_max_body_size 25m` 高于后端 20MB 上限一档，边界文件（如恰好 20MB）由后端返回契约 JSON 错误。若曾手改回 20m，改回 25m 即可
 
 **内存紧张**（服务器 ~6.5G 可用，与 slurm 等共享）
 - `docker stats --no-stream` 看三容器（预期合计 <1G）

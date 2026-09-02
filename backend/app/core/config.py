@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     # HTTP 部署阶段（TLS 未就绪）可显式设 COOKIE_SECURE=false；缺省跟随 DEBUG
     COOKIE_SECURE: bool | None = None
 
+    # 版本标识：显式注入（compose build-arg）优先；空则回退 git sha（本地 dev）；再回退 'dev'
+    APP_VERSION: str = ""
+
     # 演示应用种子（apps 表的契约演示行）：缺省跟随 DEBUG；生产可显式 SEED_DEMO_APPS=true 强制
     SEED_DEMO_APPS: bool | None = None
 
@@ -84,3 +87,27 @@ settings = get_settings()
 
 
 _load_dynamic_env_keys()
+
+
+@lru_cache
+def get_app_version() -> str:
+    """解析当前后端版本：env APP_VERSION → git rev-parse --short HEAD → 'dev'。
+
+    前端版本陈旧检测（僵尸标签页）依赖此值与 __BUILD_SHA__ 比对；
+    两端均为构建注入，'dev' 视为未注入不参与比对。
+    """
+    if settings.APP_VERSION:
+        return settings.APP_VERSION
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            cwd=Path(__file__).resolve().parents[2],
+        )
+        return out.stdout.strip() or "dev"
+    except Exception:
+        return "dev"

@@ -13,7 +13,7 @@ from app.admin.router import router as admin_router
 from app.apps.router import router as apps_router
 from app.auth.router import router as auth_router
 from app.chat.router import router as chat_router
-from app.core.config import settings
+from app.core.config import get_app_version, settings
 from app.core.middleware import CSRFMiddleware
 from app.conversations.router import router as conversations_router
 from app.db.init import dispose_engine, init_db
@@ -89,3 +89,9 @@ app.include_router(admin_router)
 @app.get("/api/health")
 async def health() -> dict:
     return {"status": "ok", "version": "0.1.0"}
+
+
+@app.get("/api/version")
+async def version() -> dict:
+    """前端版本陈旧检测（无需登录）：与前端 __BUILD_SHA__ 比对，提示用户刷新。"""
+    return {"version": get_app_version()}

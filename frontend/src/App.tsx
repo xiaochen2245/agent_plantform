@@ -8,6 +8,7 @@ import Chat from "./pages/Chat";
 import History from "./pages/History";
 import Admin from "./pages/Admin";
 import ComingSoon from "./pages/ComingSoon";
+import VersionBanner from "./components/VersionBanner";
 
 /** 会话引导只做一次（模块标志防 StrictMode 双触发/重入） */
 let sessionBootstrapped = false;
@@ -45,7 +46,9 @@ function RequireAdmin() {
 
 export default function App() {
   return (
-    <Routes>
+    <>
+      <VersionBanner />
+      <Routes>
       <Route path="/login" element={<Login />} />
       <Route
         element={
@@ -66,5 +69,6 @@ export default function App() {
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </>
   );
 }

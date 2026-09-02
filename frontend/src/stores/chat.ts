@@ -138,10 +138,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     append([userMsg, assistantMsg]);
     set({ streaming: true });
     abortController = new AbortController();
+    // A7：stopStreaming 会置空 abortController，捕获信号供 catch 判定中断来源
+    const sendSignal = abortController.signal;
 
     const finish = (realId?: string) => {
       abortController = null;
       set({ streaming: false });
+      // A8：草稿桶且未拿到真实 id 时不落本地摘要（后端已建会话，列表刷新自然带回）——消灭幽灵会话
+      if (conversationId === DRAFT_KEY && !realId) return;
       // 会话摘要落本地（标题=首条问题截断，契约 Conversations 段）
       const summaryId = realId ?? get().activeConversationId ?? conversationId;
       const list = get().messagesByConv[conversationId] ?? [];
@@ -162,16 +166,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }));
     };
 
-    /** 首轮发送后认领后端回传的真实会话 id：迁移消息桶 + 激活 */
+    /** 首轮发送后认领后端回传的真实会话 id：迁移消息桶；仅当用户仍在本会话时才激活（A8） */
     const adopt = (realId: string) => {
       if (existingId || !realId || realId === conversationId) return;
       set((s) => {
         const bucket = s.messagesByConv[conversationId] ?? [];
         const messagesByConv = { ...s.messagesByConv };
         delete messagesByConv[conversationId];
+        // 用户已切走（换应用/进其他会话）→ 只迁桶不拽回，避免打断新上下文
+        const stillHere =
+          s.activeAppId === app.id &&
+          (s.activeConversationId === null || s.activeConversationId === conversationId);
         return {
           messagesByConv: { ...messagesByConv, [realId]: bucket },
-          activeConversationId: realId,
+          ...(stillHere ? { activeConversationId: realId } : {}),
         };
       });
     };
@@ -195,15 +203,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
           patchAssistant({ status: "error", content: message, errorKind: kind });
         },
         onAgentDone: (data) => {
-          patchAssistant({ status: "done" });
+          // A3：错误态不被 agent_done 覆盖 —— 否则生产环境错误卡永远不可见
+          const current = get().messagesByConv[conversationId] ?? [];
+          const m = current.find((x) => x.id === assistantMsg.id);
+          if (m?.status !== "error") patchAssistant({ status: "done" });
           adopt(data?.conversation_id ?? "");
           finish(data?.conversation_id);
         },
       },
       abortController.signal
-    ).catch(() => {
-      // 网络/中断异常兜底：标记错误态并收尾
-      patchAssistant({ status: "error", content: "连接中断，请重试", errorKind: "generic" });
+    ).catch((err: unknown) => {
+      // A7：用户主动停止 → 保留已生成部分答案并标 done；仅真异常才错误卡
+      const aborted = sendSignal.aborted || (err as Error | undefined)?.name === "AbortError";
+      if (aborted) {
+        patchAssistant({ status: "done" });
+      } else {
+        patchAssistant({ status: "error", content: "连接中断，请重试", errorKind: "generic" });
+      }
       finish();
     });
     if (get().streaming) finish(); // 流自然结束但未见 agent_done 的兜底

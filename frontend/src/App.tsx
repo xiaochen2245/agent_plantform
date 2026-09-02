@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes, Outlet } from "react-router-dom";
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
+import { Spin } from "antd";
 import { useAuthStore } from "./stores/auth";
 import AppShell from "./components/AppShell";
 import Login from "./pages/Login";
@@ -8,9 +9,30 @@ import History from "./pages/History";
 import Admin from "./pages/Admin";
 import ComingSoon from "./pages/ComingSoon";
 
+/** 会话引导只做一次（模块标志防 StrictMode 双触发/重入） */
+let sessionBootstrapped = false;
+
 function RequireAuth({ children }: { children: ReactNode }) {
   const status = useAuthStore((s) => s.status);
+  const fetchMe = useAuthStore((s) => s.fetchMe);
+
+  // A1：idle 时引导会话（F5/直链不再误踢）；/login 不经此组件永不阻塞。
+  useEffect(() => {
+    if (status === "idle" && !sessionBootstrapped) {
+      sessionBootstrapped = true;
+      void fetchMe();
+    }
+  }, [status, fetchMe]);
+
   if (status === "authenticated") return <>{children}</>;
+  if (status === "idle" || status === "loading") {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 12, height: "100vh", alignItems: "center", justifyContent: "center" }}>
+        <Spin size="large" />
+        <span style={{ color: "#64748B", fontSize: 13 }}>正在恢复会话…</span>
+      </div>
+    );
+  }
   return <Navigate to="/login" replace />;
 }
 

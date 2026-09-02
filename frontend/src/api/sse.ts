@@ -1,3 +1,4 @@
+import { refreshOnce } from "./http";
 import type { ChatSendRequest, ChatSSEEvent, MessageErrorKind } from "../types";
 
 export interface SSEEvent {
@@ -64,7 +65,7 @@ export function parseSSEEvent(e: SSEEvent): ChatSSEEvent | null {
     case "message_end":
       return {
         event: "message_end",
-        data: data as { metadata: { usage: { total: number } } },
+        data: data as { metadata: { usage: { total: number; total_tokens?: number } } },
       };
     case "error":
       return { event: "error", data: data as { message: string } };
@@ -86,6 +87,15 @@ export interface SendChatHandlers {
 }
 
 /**
+ * usage 归一化（A6）：真机 Dify 返回 total_tokens，契约形状为 total；两者都收，缺省 0。
+ */
+export function normalizeUsage(
+  usage: { total?: number; total_tokens?: number } | undefined
+): { total: number } {
+  return { total: usage?.total ?? usage?.total_tokens ?? 0 };
+}
+
+/**
  * 发送对话消息并消费 SSE 流（fetch + ReadableStream）。
  * 返回 assistant 落库所需信息由调用方在 onAgentDone 后处理。
  */
@@ -97,13 +107,24 @@ export async function sendChatStream(
   // 相对路径在浏览器 fetch 中合法；Node/jsdom（测试）无 base URL 会抛错，
   // 显式锚定 origin 两边行为一致
   const url = new URL("/api/chat/send", window.location.origin).toString();
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify(body),
-    signal,
-  });
+  const doFetch = () =>
+    fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(body),
+      signal,
+    });
+  let resp = await doFetch();
+  // A4：裸 fetch 不走 axios 拦截器 —— 401 时单飞刷新后重发一次，仍失败才报错
+  if (resp.status === 401) {
+    try {
+      await refreshOnce();
+      resp = await doFetch();
+    } catch {
+      /* 刷新失败：沿用原 401 响应走下方统一错误分支 */
+    }
+  }
   if (!resp.ok || !resp.body) {
     let detail = `请求失败（HTTP ${resp.status}）`;
     try {
@@ -128,7 +149,7 @@ export async function sendChatStream(
         handlers.onReasoning(parsed.data.content ?? "");
         break;
       case "message_end":
-        handlers.onMessageEnd(parsed.data.metadata?.usage ?? { total: 0 });
+        handlers.onMessageEnd(normalizeUsage(parsed.data.metadata?.usage));
         break;
       case "error":
         handlers.onError(parsed.data.message || "回答生成失败，请重试");

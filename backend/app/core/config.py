@@ -8,14 +8,19 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 def _load_dynamic_env_keys() -> None:
     """pydantic-settings 只把 .env 中「已声明字段」载入 Settings；
-    DIFY_API_KEY_APP_<id> 是动态键（app/dify/client.py 经 os.environ 读取），
-    这里手动注入，保证 .env 与真实环境变量行为一致。"""
+    DIFY_API_KEY_APP_<id> 与 DIFY_DATASET_API_KEY 是动态键
+    （app/dify/client.py 经 os.environ 读取），这里手动注入，
+    保证 .env 与真实环境变量行为一致。"""
     env_file = Path(__file__).resolve().parents[2] / ".env"  # backend/.env
     if not env_file.exists():
         return
     for line in env_file.read_text(encoding="utf-8").splitlines():
         line = line.strip()
-        if line.startswith("DIFY_API_KEY_APP_") and "=" in line and not line.startswith("#"):
+        if (
+            line.startswith(("DIFY_API_KEY_APP_", "DIFY_DATASET_API_KEY"))
+            and "=" in line
+            and not line.startswith("#")
+        ):
             key, _, value = line.partition("=")
             os.environ.setdefault(key.strip(), value.strip())
 

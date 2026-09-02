@@ -21,6 +21,7 @@ from app.db.session import SessionLocal
 from app.dify.client import DifyClient, app_api_key
 from app.files.cleanup import sweep_expired_uploads
 from app.files.router import router as files_router
+from app.kb.router import router as kb_router
 from app.models.app import App
 
 _logger = logging.getLogger("app.main")
@@ -82,6 +83,7 @@ app.include_router(auth_router)
 app.include_router(apps_router)
 app.include_router(chat_router)
 app.include_router(files_router)
+app.include_router(kb_router)
 app.include_router(conversations_router)
 app.include_router(admin_router)
 

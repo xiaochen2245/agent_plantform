@@ -8,6 +8,7 @@ import Chat from "./pages/Chat";
 import History from "./pages/History";
 import Admin from "./pages/Admin";
 import ComingSoon from "./pages/ComingSoon";
+import Knowledge from "./pages/Knowledge";
 import VersionBanner from "./components/VersionBanner";
 
 /** 会话引导只做一次（模块标志防 StrictMode 双触发/重入） */
@@ -65,7 +66,7 @@ export default function App() {
         {/* 编辑端占位（本切片不展开） */}
         <Route path="/workbench" element={<ComingSoon title="Agent 工作台" description="创建、编排与发布企业 Agent —— 已纳入编辑端规划。" />} />
         <Route path="/workflows" element={<ComingSoon title="工作流编排" description="节点画布：知识检索 → LLM → 条件分支的确定性流程编排。" />} />
-        <Route path="/kb" element={<ComingSoon title="知识库" description="企业文档接入、切分与检索配置。" />} />
+        <Route path="/kb" element={<Knowledge />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

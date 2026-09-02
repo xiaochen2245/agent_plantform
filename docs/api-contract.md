@@ -120,3 +120,28 @@
 
 ## 前端展示语义
 - 思考面板：可折叠「思考过程」；生成中且尚无正文时默认展开，正文开始/流结束后默认收起；历史回放默认收起
+
+---
+
+# v7 增补（wave8 · orchestrator 批准 · 知识库）
+
+## 通用
+- 响应形状 = Dify Knowledge API **原样透传**（含 `data[]/total/has_more/page/limit`）
+- 鉴权：后端用独立的 `DIFY_DATASET_API_KEY`（工作区级，与 per-app key 是两套凭证）；未配置 → 503 `{"detail":"knowledge base service not configured"}`
+- 上游 4xx → 同码 + 精简 message；上游 5xx/网络错误 → 502 `{"detail":"knowledge service unavailable"}`
+
+## 端点（prefix /api/kb）
+| 端点 | 权限 | 说明 |
+|---|---|---|
+| GET /api/kb/datasets?page=&page_size= | 登录 | 知识库列表（透传） |
+| GET /api/kb/datasets/{id}/documents?page=&page_size=&keyword= | 登录 | 文档列表（含 `indexing_status`；前端对未终态文档 5s 轮询） |
+| POST /api/kb/datasets/{id}/documents/text `{"name","text","indexing_technique"}` | PLATFORM_ADMIN | 201 透传 create-by-text 响应 |
+| POST /api/kb/datasets/{id}/documents/file（multipart：`file` + `indexing_technique` 表单域） | PLATFORM_ADMIN | ≤20MB；文档类 MIME 白名单（pdf/docx/pptx/xlsx/txt/md/csv/html/json）；201 透传 |
+| DELETE /api/kb/datasets/{id}/documents/{document_id} | PLATFORM_ADMIN | 204 |
+| POST /api/kb/datasets/{id}/retrieve `{"query"}` | 登录 | 命中测试，透传 `{query:{records:[{score,segment:{content,document:{name}}}]}}` |
+
+## 语义与边界
+- `indexing_technique`（high_quality|economy）必须与目标库一致；由前端从 datasets 列表取值透传
+- App↔知识库的**绑定**只能在 Dify 控制台完成（Service API 无此能力）；门户 /kb = 文档管理 + 检索测试
+- Dataset key 作用域 = 创建该 key 的成员可见的库；知识库需在 Dify 控制台授权全员后才对平台可见
+- 操作审计：后端结构化日志（user/dataset/doc id），不落库

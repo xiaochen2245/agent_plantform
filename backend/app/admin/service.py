@@ -65,6 +65,7 @@ def user_out(user: User, dept_name: str | None, roles: list[str]) -> dict:
         "name": user.name,
         "email": user.email,
         "dept": dept_name,
+        "dept_id": user.dept_id,  # 行菜单「设置部门」回显用（名称可重名，id 才可靠）
         "roles": roles or ["USER"],
         "status": user.status,
         "created_at": _iso(user.created_at),

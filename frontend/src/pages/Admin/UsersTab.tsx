@@ -1,4 +1,5 @@
 import {
+  ApartmentOutlined,
   KeyOutlined,
   MoreOutlined,
   ReloadOutlined,
@@ -13,6 +14,7 @@ import {
   Input,
   Modal,
   Segmented,
+  Select,
   Table,
   Tag,
   Tooltip,
@@ -25,6 +27,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   createUser,
   getUserApps,
+  listDepts,
   listUsers,
   patchUser,
   putUserApps,
@@ -52,6 +55,7 @@ interface CreateUserForm {
   name: string;
   email: string;
   password: string;
+  dept_id?: number | null;
 }
 
 export default function UsersTab() {
@@ -68,6 +72,37 @@ export default function UsersTab() {
   const [creating, setCreating] = useState(false);
 
   const [resetTarget, setResetTarget] = useState<AdminUser | null>(null);
+
+  // 设置部门（行菜单）：目标用户 + 部门目录（懒加载一次）
+  const [deptTarget, setDeptTarget] = useState<AdminUser | null>(null);
+  const [deptValue, setDeptValue] = useState<number | null>(null);
+  const [deptOptions, setDeptOptions] = useState<{ label: string; value: number }[]>([]);
+  const [savingDept, setSavingDept] = useState(false);
+
+  // 部门目录懒加载：行菜单「设置部门」或新建用户弹窗首次需要时拉一次
+  useEffect(() => {
+    if ((!deptTarget && !createOpen) || deptOptions.length > 0) return;
+    listDepts()
+      .then(({ items }) =>
+        setDeptOptions(items.map((d) => ({ label: d.name, value: d.id })))
+      )
+      .catch(() => setDeptOptions([]));
+  }, [deptTarget, createOpen, deptOptions.length]);
+
+  async function saveDept() {
+    if (!deptTarget) return;
+    setSavingDept(true);
+    try {
+      const updated = await patchUser(deptTarget.id, { dept_id: deptValue });
+      patchRow(updated);
+      message.success(`已将 ${deptTarget.name} 归属${updated.dept ? `「${updated.dept}」` : "移出部门"}`);
+      setDeptTarget(null);
+    } catch (e) {
+      message.error(extractDetail(e, "部门设置失败"));
+    } finally {
+      setSavingDept(false);
+    }
+  }
   const [resetPasswordValue, setResetPasswordValue] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
 
@@ -204,6 +239,7 @@ export default function UsersTab() {
       render: (_: unknown, record: AdminUser) => {
         const items: MenuProps["items"] = [
           { key: "auth", icon: <TeamOutlined />, label: "授权 Agent" },
+          { key: "dept", icon: <ApartmentOutlined />, label: "设置部门" },
           { key: "reset", icon: <KeyOutlined />, label: "重置密码" },
         ];
         return (
@@ -212,6 +248,10 @@ export default function UsersTab() {
               items,
               onClick: ({ key }) => {
                 if (key === "auth") setDrawerUser(record);
+                if (key === "dept") {
+                  setDeptTarget(record);
+                  setDeptValue(record.dept_id ?? null);
+                }
                 if (key === "reset") {
                   setResetTarget(record);
                   setResetPasswordValue(null);
@@ -322,7 +362,36 @@ export default function UsersTab() {
           >
             <Input.Password placeholder="≥ 6 位" />
           </Form.Item>
+          <Form.Item name="dept_id" label="归属部门（可选）">
+            <Select
+              allowClear
+              placeholder="暂不归属"
+              options={deptOptions}
+            />
+          </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title={deptTarget ? `设置部门 · ${deptTarget.name}` : "设置部门"}
+        open={deptTarget !== null}
+        onCancel={() => setDeptTarget(null)}
+        onOk={() => void saveDept()}
+        okText="保存"
+        confirmLoading={savingDept}
+        destroyOnClose
+      >
+        <p style={{ color: "var(--text-muted)", fontSize: 12.5, marginTop: 0 }}>
+          部门级授权对该部门所有员工生效（与用户/角色授权取并集）；部门在「部门」页维护。
+        </p>
+        <Select
+          style={{ width: "100%" }}
+          allowClear
+          placeholder="选择部门（清空 = 移出部门）"
+          value={deptValue}
+          onChange={setDeptValue}
+          options={deptOptions}
+        />
       </Modal>
 
       <Modal

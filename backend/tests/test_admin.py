@@ -177,3 +177,21 @@ async def test_csrf_guards_admin_writes(client: AsyncClient):
     )
     assert resp.status_code == 403
     assert resp.json()["detail"] == "Forbidden: invalid origin"
+
+
+async def test_user_out_includes_dept_id(client: AsyncClient):
+    """契约：列表/创建/更新回显 dept_id（前端「设置部门」按 id 回显，名称可重名）。"""
+    await login(client)
+    await client.post("/api/admin/depts", json={"name": "dept-a"})
+    created = await client.post(
+        "/api/admin/users",
+        json={"name": "u1", "email": "u1@company.com", "password": "pass-123", "dept_id": 1},
+    )
+    assert created.status_code == 201
+    assert created.json()["dept_id"] == 1
+    listed = await client.get("/api/admin/users", params={"query": "u1@"})
+    assert listed.json()["items"][0]["dept_id"] == 1
+    moved = await client.patch(
+        f"/api/admin/users/{created.json()['id']}", json={"dept_id": None}
+    )
+    assert moved.json()["dept_id"] is None

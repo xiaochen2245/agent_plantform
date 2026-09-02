@@ -156,6 +156,8 @@ async def update_user(
         user.name = payload["name"]
     if "dept_id" in payload and payload["dept_id"] is not None:
         user.dept_id = payload["dept_id"]
+    elif "dept_id" in payload and payload["dept_id"] is None and user.dept_id is not None:
+        user.dept_id = None  # 显式传 null = 移出部门（前端可清空选择）
     if payload.get("status") is not None:
         user.status = payload["status"]
     if payload.get("roles") is not None:

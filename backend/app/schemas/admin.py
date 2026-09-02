@@ -7,6 +7,7 @@ class AdminUserOut(BaseModel):
     name: str
     email: str
     dept: str | None
+    dept_id: int | None = None  # 行菜单「设置部门」回显（名称可重名，按 id 回显）
     roles: list[str]
     status: int
     created_at: str

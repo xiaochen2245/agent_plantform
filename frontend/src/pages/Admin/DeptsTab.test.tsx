@@ -95,7 +95,7 @@ afterEach(() => {
 afterAll(() => server.close());
 
 describe("部门管理 Tab", () => {
-  it("列表加载：渲染树形 + 默认选中第一个顶级部门", async () => {
+  it("列表加载：渲染扁平列表 + 默认选中第一个部门", async () => {
     render(
       <MemoryRouter>
         <DeptsTab />
@@ -105,12 +105,12 @@ describe("部门管理 Tab", () => {
     expect(screen.getByText("研发部")).toBeTruthy();
     expect(screen.getByText("后端组")).toBeTruthy();
     expect(screen.getByText("财务部")).toBeTruthy();
-    // 详情面板出现
-    expect(screen.getByText(/深度 1/)).toBeTruthy();
+    // 详情面板出现（无子部门层级：不再展示深度/父部门）
+    expect(screen.getByText("授权 Agent")).toBeTruthy();
     expect(listCalls).toContain("list");
   });
 
-  it("选中节点后展示操作按钮", async () => {
+  it("选中部门后展示操作按钮（无子部门/移动）", async () => {
     render(
       <MemoryRouter>
         <DeptsTab />
@@ -119,10 +119,10 @@ describe("部门管理 Tab", () => {
     await screen.findByText("研发部");
     fireEvent.click(screen.getByText("研发部"));
     expect(screen.getByText("授权 Agent")).toBeTruthy();
-    expect(screen.getByText("新建子部门")).toBeTruthy();
     expect(screen.getByText("改名")).toBeTruthy();
-    expect(screen.getByText("移动")).toBeTruthy();
     expect(screen.getByText("删除")).toBeTruthy();
+    expect(screen.queryByText("新建子部门")).toBeNull();
+    expect(screen.queryByText("移动")).toBeNull();
   });
 
   it("创建顶级部门：调 POST /api/admin/depts", async () => {

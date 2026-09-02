@@ -11,6 +11,7 @@ export interface AdminUser {
   name: string;
   email: string;
   dept: string | null;
+  dept_id?: number | null;
   roles: string[];
   status: number;
   created_at: string;

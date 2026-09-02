@@ -399,4 +399,128 @@ export const handlers = [
       headers: { "Content-Type": "text/event-stream" },
     });
   }),
+
+  /* ── 知识库（契约 v7）：真实后端透传 Dify，mock 提供种子形状 ── */
+
+  mswHttp.get("/api/kb/datasets", () =>
+    HttpResponse.json({
+      total: 1,
+      has_more: false,
+      page: 1,
+      limit: 20,
+      data: [
+        {
+          id: "ds-eco-1",
+          name: "General Mode-ECO 1",
+          document_count: 2,
+          word_count: 356,
+          indexing_technique: "economy",
+          created_at: 1788300000,
+        },
+      ],
+    })
+  ),
+
+  mswHttp.get("/api/kb/datasets/:id/documents", () =>
+    HttpResponse.json({
+      total: 2,
+      has_more: false,
+      page: 1,
+      limit: 100,
+      data: [
+        {
+          id: "doc-1",
+          name: "报销政策.pdf",
+          word_count: 210,
+          hit_count: 3,
+          indexing_status: "completed",
+          error: null,
+          enabled: true,
+          created_at: 1788300100,
+        },
+        {
+          id: "doc-2",
+          name: "运维手册.md",
+          word_count: 146,
+          hit_count: 0,
+          indexing_status: "indexing",
+          error: null,
+          enabled: true,
+          created_at: 1788300200,
+        },
+      ],
+    })
+  ),
+
+  mswHttp.post("/api/kb/datasets/:id/retrieve", async ({ request }) => {
+    const body = (await request.json()) as { query?: string };
+    const q = body.query ?? "";
+    return HttpResponse.json({
+      query: { content: q },
+      records: [
+        {
+          score: 0.912,
+          segment: {
+            content: `「${q}」相关：差旅报销需在出差结束后 7 天内提交。`,
+            document: { id: "doc-1", name: "报销政策.pdf" },
+          },
+        },
+      ],
+    });
+  }),
+
+  /* 契约 v9：库级管理（建/删/授权/审计）与目录 */
+
+  mswHttp.post("/api/kb/datasets", async ({ request }) => {
+    const body = (await request.json()) as { name?: string; indexing_technique?: string };
+    return HttpResponse.json(
+      {
+        id: "ds-new-1",
+        name: body.name ?? "",
+        document_count: 0,
+        word_count: 0,
+        indexing_technique: body.indexing_technique ?? "high_quality",
+        created_at: 1788300000,
+      },
+      { status: 201 }
+    );
+  }),
+
+  mswHttp.delete("/api/kb/datasets/:id", () => new HttpResponse(null, { status: 204 })),
+
+  mswHttp.get("/api/kb/datasets/:id/grants", () =>
+    HttpResponse.json({
+      items: [{ principal_type: "role", principal_id: 2, name: "员工" }],
+    })
+  ),
+
+  mswHttp.post("/api/kb/datasets/:id/grants", () => HttpResponse.json({}, { status: 201 })),
+
+  mswHttp.delete("/api/kb/datasets/:id/grants/:t/:pid", () =>
+    new HttpResponse(null, { status: 204 })
+  ),
+
+  mswHttp.get("/api/kb/audit", () =>
+    HttpResponse.json({
+      total: 1,
+      items: [
+        {
+          id: 1,
+          user: "张明",
+          action: "dataset_create",
+          dataset_id: "ds-eco-1",
+          detail: "{\"name\": \"General Mode-ECO 1\"}",
+          created_at: "2026-09-02T09:00:00Z",
+        },
+      ],
+    })
+  ),
+
+  mswHttp.get("/api/admin/depts", () =>
+    HttpResponse.json({ items: [{ id: 1, name: "信息技术部" }] })
+  ),
+
+  mswHttp.get("/api/admin/roles", () =>
+    HttpResponse.json({ items: [{ id: 2, code: "USER", name: "员工" }] })
+  ),
 ];

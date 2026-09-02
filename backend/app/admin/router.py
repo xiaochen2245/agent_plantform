@@ -1,10 +1,13 @@
 """Admin 路由：用户管理 + 用户级 App 授权（仅 PLATFORM_ADMIN，契约 v2 §Admin）。"""
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin import service
 from app.auth.deps import require_platform_admin
 from app.db.session import get_db
+from app.models.department import Department
+from app.models.role import Role
 from app.models.user import User
 from app.schemas.admin import (
     AdminUserCreate,
@@ -13,9 +16,31 @@ from app.schemas.admin import (
     ResetPasswordResponse,
     UserAppsResponse,
     UserAppsUpdate,
+    UserDatasetsResponse,
+    UserDatasetsUpdate,
 )
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+
+@router.get("/depts")
+async def list_depts(
+    _admin: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """契约 v9：部门目录（知识库授权选择器数据源；全量不分页，内部规模）。"""
+    rows = (await db.execute(select(Department).order_by(Department.id))).scalars().all()
+    return {"items": [{"id": d.id, "name": d.name} for d in rows]}
+
+
+@router.get("/roles")
+async def list_roles(
+    _admin: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """契约 v9：角色目录（同上）。"""
+    rows = (await db.execute(select(Role).order_by(Role.id))).scalars().all()
+    return {"items": [{"id": r.id, "code": r.code, "name": r.name} for r in rows]}
 
 
 @router.get("/users", response_model=AdminUsersResponse)
@@ -112,3 +137,30 @@ async def set_user_apps(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
     await db.commit()
     return UserAppsResponse(app_ids=result)
+
+
+@router.get("/users/{user_id}/datasets", response_model=UserDatasetsResponse)
+async def get_user_datasets(
+    user_id: int,
+    _admin: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """契约 v8：用户级知识库授权（租户隔离映射）。"""
+    dataset_ids = await service.get_user_datasets(db, user_id)
+    if dataset_ids is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    return UserDatasetsResponse(dataset_ids=dataset_ids)
+
+
+@router.put("/users/{user_id}/datasets", response_model=UserDatasetsResponse)
+async def set_user_datasets(
+    user_id: int,
+    body: UserDatasetsUpdate,
+    _admin: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await service.set_user_datasets(db, user_id, body.dataset_ids)
+    if result is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    await db.commit()
+    return UserDatasetsResponse(dataset_ids=result)

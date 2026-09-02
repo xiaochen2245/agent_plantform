@@ -69,3 +69,23 @@ export async function getUserApps(id: number): Promise<{ app_ids: number[] }> {
 export async function putUserApps(id: number, appIds: number[]): Promise<void> {
   await http.put(`/admin/users/${id}/apps`, { app_ids: appIds });
 }
+
+/** 契约 v8：用户级知识库授权（dataset_id 为 Dify 侧 UUID）。 */
+export async function getUserDatasets(id: number): Promise<{ dataset_ids: string[] }> {
+  return (await http.get<{ dataset_ids: string[] }>(`/admin/users/${id}/datasets`)).data;
+}
+
+export async function putUserDatasets(id: number, datasetIds: string[]): Promise<void> {
+  await http.put(`/admin/users/${id}/datasets`, { dataset_ids: datasetIds });
+}
+
+/** 契约 v9：部门/角色目录（知识库授权选择器数据源）。 */
+export async function listDepts(): Promise<{ id: number; name: string }[]> {
+  return (await http.get<{ items: { id: number; name: string }[] }>("/admin/depts")).data.items ?? [];
+}
+
+export async function listRoles(): Promise<{ id: number; code: string; name: string }[]> {
+  return (
+    await http.get<{ items: { id: number; code: string; name: string }[] }>("/admin/roles")
+  ).data.items ?? [];
+}

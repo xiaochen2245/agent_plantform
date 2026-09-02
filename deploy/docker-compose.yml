@@ -29,6 +29,8 @@ services:
     build:
       context: ../backend
       dockerfile: Dockerfile
+      args:
+        APP_VERSION: ${GIT_SHA:-dev}
     container_name: ap-backend
     env_file:
       - path: .env
@@ -58,6 +60,8 @@ services:
     build:
       context: ../frontend
       dockerfile: Dockerfile
+      args:
+        BUILD_SHA: ${GIT_SHA:-dev}
     container_name: ap-frontend
     # Coexist with Dify on the same host: Dify keeps :80/:3000, our portal
     # listens on PORTAL_PORT (default 8080). Set via deploy/.env

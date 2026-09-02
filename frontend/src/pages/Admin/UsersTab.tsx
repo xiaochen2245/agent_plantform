@@ -3,6 +3,7 @@ import {
   KeyOutlined,
   MoreOutlined,
   ReloadOutlined,
+  SafetyOutlined,
   TeamOutlined,
   UserAddOutlined,
   UserOutlined,
@@ -28,6 +29,7 @@ import {
   createUser,
   getUserApps,
   listDepts,
+  listRoles,
   listUsers,
   patchUser,
   putUserApps,
@@ -56,6 +58,7 @@ interface CreateUserForm {
   email: string;
   password: string;
   dept_id?: number | null;
+  roles?: string[];
 }
 
 export default function UsersTab() {
@@ -172,6 +175,38 @@ export default function UsersTab() {
     }
   }
 
+  // 设置角色（行菜单）：目标用户 + 角色目录（懒加载；value=角色码，PATCH 全量替换）
+  const [roleTarget, setRoleTarget] = useState<AdminUser | null>(null);
+  const [roleValue, setRoleValue] = useState<string[]>([]);
+  const [roleOptions, setRoleOptions] = useState<{ label: string; value: string }[]>([]);
+  const [savingRole, setSavingRole] = useState(false);
+
+  useEffect(() => {
+    if ((!roleTarget && !createOpen) || roleOptions.length > 0) return;
+    listRoles()
+      .then(({ items }) =>
+        setRoleOptions(items.map((r) => ({ label: `${r.name}（${r.code}）`, value: r.code })))
+      )
+      .catch(() => setRoleOptions([]));
+  }, [roleTarget, createOpen, roleOptions.length]);
+
+  async function saveRole() {
+    if (!roleTarget) return;
+    setSavingRole(true);
+    try {
+      const updated = await patchUser(roleTarget.id, {
+        roles: roleValue.length > 0 ? roleValue : ["USER"], // 全量替换；清空=回基础角色
+      });
+      patchRow(updated);
+      message.success(`已保存 ${roleTarget.name} 的角色`);
+      setRoleTarget(null);
+    } catch (e) {
+      message.error(extractDetail(e, "角色设置失败"));
+    } finally {
+      setSavingRole(false);
+    }
+  }
+
   async function doResetPassword() {
     if (!resetTarget) return;
     setResetting(true);
@@ -240,6 +275,7 @@ export default function UsersTab() {
         const items: MenuProps["items"] = [
           { key: "auth", icon: <TeamOutlined />, label: "授权 Agent" },
           { key: "dept", icon: <ApartmentOutlined />, label: "设置部门" },
+          { key: "roles", icon: <SafetyOutlined />, label: "设置角色" },
           { key: "reset", icon: <KeyOutlined />, label: "重置密码" },
         ];
         return (
@@ -251,6 +287,10 @@ export default function UsersTab() {
                 if (key === "dept") {
                   setDeptTarget(record);
                   setDeptValue(record.dept_id ?? null);
+                }
+                if (key === "roles") {
+                  setRoleTarget(record);
+                  setRoleValue(record.roles ?? []);
                 }
                 if (key === "reset") {
                   setResetTarget(record);
@@ -369,7 +409,33 @@ export default function UsersTab() {
               options={deptOptions}
             />
           </Form.Item>
+          <Form.Item name="roles" label="角色（可选，缺省普通员工）">
+            <Select mode="multiple" allowClear placeholder="USER" options={roleOptions} />
+          </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title={roleTarget ? `设置角色 · ${roleTarget.name}` : "设置角色"}
+        open={roleTarget !== null}
+        onCancel={() => setRoleTarget(null)}
+        onOk={() => void saveRole()}
+        okText="保存"
+        confirmLoading={savingRole}
+        destroyOnClose
+      >
+        <p style={{ color: "var(--text-muted)", fontSize: 12.5, marginTop: 0 }}>
+          角色是授权的载体：给角色授权 Agent（角色页）或知识库（知识库页授权抽屉）后，拥有该角色的员工全体生效。USER 为基础角色不可移除意义；全不选 = 仅 USER。角色在「角色」页维护。
+        </p>
+        <Select
+          style={{ width: "100%" }}
+          mode="multiple"
+          allowClear
+          placeholder="选择角色"
+          value={roleValue}
+          onChange={setRoleValue}
+          options={roleOptions}
+        />
       </Modal>
 
       <Modal

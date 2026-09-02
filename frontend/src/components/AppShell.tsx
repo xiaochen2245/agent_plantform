@@ -37,7 +37,7 @@ export default function AppShell() {
       ],
     },
     ...(isAdmin
-      ? [{ section: "管 理", items: [{ to: "/admin", icon: <UserSwitchOutlined />, label: "用户与授权" }] }]
+      ? [{ section: "管 理", items: [{ to: "/admin", icon: <UserSwitchOutlined />, label: "权限管理" }] }]
       : []),
   ];
 

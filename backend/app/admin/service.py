@@ -218,3 +218,81 @@ async def set_user_apps(
         )
     await session.flush()
     return sorted(set(app_ids))
+
+
+# ── 三态授权（user / dept / role）共享函数 ───────────────────────────────────
+
+_VALID_PRINCIPAL_TYPES = {"user", "dept", "role"}
+
+
+async def _principal_exists(
+    session: AsyncSession, principal_type: str, principal_id: int
+) -> bool:
+    """按 principal_type 校验主体存在；非法类型直接 False。"""
+    if principal_type == "user":
+        return (await session.get(User, principal_id)) is not None
+    if principal_type == "dept":
+        return (await session.get(Department, principal_id)) is not None
+    if principal_type == "role":
+        return (await session.get(Role, principal_id)) is not None
+    return False
+
+
+async def get_principal_apps(
+    session: AsyncSession, principal_type: str, principal_id: int
+) -> list[int] | None:
+    """返回该主体已授权 app_id 列表；主体不存在 → None。"""
+    if principal_type not in _VALID_PRINCIPAL_TYPES:
+        return None
+    if not await _principal_exists(session, principal_type, principal_id):
+        return None
+    rows = await session.execute(
+        select(AppAuthorization.app_id).where(
+            AppAuthorization.principal_type == principal_type,
+            AppAuthorization.principal_id == principal_id,
+        )
+    )
+    return sorted({r[0] for r in rows})
+
+
+async def set_principal_apps(
+    session: AsyncSession, principal_type: str, principal_id: int, app_ids: list[int]
+) -> list[int] | str | None:
+    """全量替换主体授权。
+
+    返回：
+    - None   主体不存在
+    - 'UNKNOWN_APPS' 部分 app_id 不存在
+    - 'INVALID_PRINCIPAL' 非法 principal_type
+    - list   替换后的 app_ids（已排序去重）
+    """
+    if principal_type not in _VALID_PRINCIPAL_TYPES:
+        return "INVALID_PRINCIPAL"
+    if not await _principal_exists(session, principal_type, principal_id):
+        return None
+    from app.models.app import App as AppModel
+
+    known = set(
+        r[0]
+        for r in await session.execute(
+            select(AppModel.id).where(AppModel.id.in_(app_ids))
+        )
+    )
+    if set(app_ids) - known:
+        return "UNKNOWN_APPS"
+    await session.execute(
+        delete(AppAuthorization).where(
+            AppAuthorization.principal_type == principal_type,
+            AppAuthorization.principal_id == principal_id,
+        )
+    )
+    for app_id in sorted(set(app_ids)):
+        session.add(
+            AppAuthorization(
+                app_id=app_id,
+                principal_type=principal_type,
+                principal_id=principal_id,
+            )
+        )
+    await session.flush()
+    return sorted(set(app_ids))

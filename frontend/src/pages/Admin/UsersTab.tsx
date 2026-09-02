@@ -1,5 +1,25 @@
-import { KeyOutlined, MoreOutlined, ReloadOutlined, TeamOutlined, UserAddOutlined, UserOutlined } from "@ant-design/icons";
-import { Avatar, Button, Checkbox, Drawer, Dropdown, Form, Input, Modal, Segmented, Table, Tag, Tooltip, Typography, message } from "antd";
+import {
+  KeyOutlined,
+  MoreOutlined,
+  ReloadOutlined,
+  TeamOutlined,
+  UserAddOutlined,
+  UserOutlined,
+} from "@ant-design/icons";
+import {
+  Avatar,
+  Button,
+  Form,
+  Input,
+  Modal,
+  Segmented,
+  Table,
+  Tag,
+  Tooltip,
+  Typography,
+  Dropdown,
+  message,
+} from "antd";
 import type { MenuProps } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -10,15 +30,19 @@ import {
   putUserApps,
   resetPassword,
   type AdminUser,
-} from "../api/admin";
-import { extractDetail } from "../api/http";
-import { useChatStore } from "../stores/chat";
+} from "../../api/admin";
+import { extractDetail } from "../../api/http";
+import AuthorizationsDrawer from "./AuthorizationsDrawer";
 
 const PAGE_SIZE = 20;
 
 function roleTags(roles: string[]): React.ReactNode[] {
   return roles.map((r) => (
-    <Tag key={r} color={r === "PLATFORM_ADMIN" ? "teal" : "default"} style={{ marginInlineEnd: 4 }}>
+    <Tag
+      key={r}
+      color={r === "PLATFORM_ADMIN" ? "teal" : "default"}
+      style={{ marginInlineEnd: 4 }}
+    >
       {r === "PLATFORM_ADMIN" ? "管理员" : r === "APP_ADMIN" ? "应用管理员" : "员工"}
     </Tag>
   ));
@@ -30,12 +54,7 @@ interface CreateUserForm {
   password: string;
 }
 
-/** 用户与授权工作台（仅 PLATFORM_ADMIN，路由守卫见 App.tsx）。
- * 契约 v2 真实端点：列表分页/搜索、PATCH 状态、新建、重置密码、用户级 Agent 授权。 */
-export default function Admin() {
-  const apps = useChatStore((s) => s.apps);
-  const loadApps = useChatStore((s) => s.loadApps);
-
+export default function UsersTab() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -44,16 +63,12 @@ export default function Admin() {
   const [loading, setLoading] = useState(false);
 
   const [drawerUser, setDrawerUser] = useState<AdminUser | null>(null);
-  const [drawerApps, setDrawerApps] = useState<number[]>([]);
-  const [drawerLoading, setDrawerLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm] = Form.useForm<CreateUserForm>();
   const [creating, setCreating] = useState(false);
 
   const [resetTarget, setResetTarget] = useState<AdminUser | null>(null);
-  const [resetPassword_, setResetPassword_] = useState<string | null>(null);
+  const [resetPasswordValue, setResetPasswordValue] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
 
   const refresh = useCallback(
@@ -85,11 +100,6 @@ export default function Admin() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, statusFilter]);
 
-  useEffect(() => {
-    if (apps.length === 0) void loadApps();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   function patchRow(updated: AdminUser) {
     setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
   }
@@ -105,41 +115,12 @@ export default function Admin() {
     }
   }
 
-  async function openDrawer(user: AdminUser) {
-    setDrawerUser(user);
-    setDrawerApps([]);
-    setDrawerLoading(true);
-    try {
-      const { app_ids } = await getUserApps(user.id);
-      setDrawerApps(app_ids);
-    } catch {
-      message.error("该用户授权信息加载失败");
-      setDrawerUser(null);
-    } finally {
-      setDrawerLoading(false);
-    }
-  }
-
-  async function saveAuthorizations() {
-    if (!drawerUser) return;
-    setSaving(true);
-    try {
-      await putUserApps(drawerUser.id, drawerApps);
-      message.success(`已保存 ${drawerUser.name} 的 Agent 授权`);
-      setDrawerUser(null);
-    } catch (e) {
-      message.error(extractDetail(e, "授权保存失败"));
-    } finally {
-      setSaving(false);
-    }
-  }
-
   async function submitCreate() {
     let values: CreateUserForm;
     try {
       values = await createForm.validateFields();
     } catch {
-      return; // 校验错误已由 Form 展示
+      return;
     }
     setCreating(true);
     try {
@@ -161,7 +142,7 @@ export default function Admin() {
     setResetting(true);
     try {
       const { password } = await resetPassword(resetTarget.id);
-      setResetPassword_(password);
+      setResetPasswordValue(password);
     } catch (e) {
       message.error(extractDetail(e, "重置失败"));
     } finally {
@@ -188,7 +169,8 @@ export default function Admin() {
       title: "部门",
       dataIndex: "dept",
       width: 120,
-      render: (dept: string | null) => dept ?? <span style={{ color: "var(--text-muted)" }}>—</span>,
+      render: (dept: string | null) =>
+        dept ?? <span style={{ color: "var(--text-muted)" }}>—</span>,
     },
     { title: "角色", dataIndex: "roles", width: 180, render: roleTags },
     {
@@ -202,7 +184,11 @@ export default function Admin() {
             <Button
               type="text"
               size="small"
-              style={{ color: enabled ? "var(--teal)" : "var(--text-muted)", fontWeight: 600, paddingInline: 4 }}
+              style={{
+                color: enabled ? "var(--teal)" : "var(--text-muted)",
+                fontWeight: 600,
+                paddingInline: 4,
+              }}
               onClick={() => void toggleStatus(record)}
             >
               {enabled ? "● 启用" : "○ 禁用"}
@@ -225,10 +211,10 @@ export default function Admin() {
             menu={{
               items,
               onClick: ({ key }) => {
-                if (key === "auth") void openDrawer(record);
+                if (key === "auth") setDrawerUser(record);
                 if (key === "reset") {
                   setResetTarget(record);
-                  setResetPassword_(null);
+                  setResetPasswordValue(null);
                 }
               },
             }}
@@ -242,16 +228,7 @@ export default function Admin() {
   ];
 
   return (
-    <div className="admin-page">
-      <div className="page-header">
-        <h2 className="font-display">用户与授权</h2>
-        <span className="page-header-sub">企业员工账号与 Agent 访问授权</span>
-        <div style={{ flex: 1 }} />
-        <Button icon={<UserAddOutlined />} type="primary" onClick={() => setCreateOpen(true)}>
-          添加用户
-        </Button>
-      </div>
-
+    <div>
       <div className="admin-toolbar">
         <Input.Search
           placeholder="搜索姓名或邮箱"
@@ -273,6 +250,9 @@ export default function Admin() {
           options={["全部", "启用", "禁用"]}
         />
         <div style={{ flex: 1 }} />
+        <Button icon={<UserAddOutlined />} type="primary" onClick={() => setCreateOpen(true)}>
+          添加用户
+        </Button>
         <span style={{ color: "var(--text-muted)", fontSize: 12.5 }}>员工总数 {total}</span>
       </div>
 
@@ -293,34 +273,21 @@ export default function Admin() {
         />
       </div>
 
-      <Drawer
-        title={drawerUser ? `授权 Agent · ${drawerUser.name}` : "授权 Agent"}
-        width={420}
+      <AuthorizationsDrawer
         open={drawerUser !== null}
+        title={drawerUser ? `授权 Agent · ${drawerUser.name}` : "授权 Agent"}
+        hint="勾选该员工可直接使用的 Agent（用户级授权；部门/角色级授权见对应标签）"
+        load={async () => {
+          if (!drawerUser) return [];
+          const { app_ids } = await getUserApps(drawerUser.id);
+          return app_ids;
+        }}
+        save={async (ids) => {
+          if (!drawerUser) return;
+          await putUserApps(drawerUser.id, ids);
+        }}
         onClose={() => setDrawerUser(null)}
-        footer={
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-            <Button onClick={() => setDrawerUser(null)}>取消</Button>
-            <Button type="primary" loading={saving} disabled={drawerLoading} onClick={() => void saveAuthorizations()}>
-              保存
-            </Button>
-          </div>
-        }
-      >
-        <p style={{ color: "var(--text-muted)", fontSize: 12.5, marginTop: 0 }}>
-          勾选该员工可直接使用的 Agent（用户级授权；部门/角色级授权后续开放）
-        </p>
-        {drawerLoading ? (
-          <span style={{ color: "var(--text-muted)", fontSize: 12.5 }}>加载当前授权…</span>
-        ) : (
-          <Checkbox.Group
-            style={{ display: "flex", flexDirection: "column", gap: 14 }}
-            value={drawerApps}
-            onChange={(vals) => setDrawerApps(vals as number[])}
-            options={apps.map((a) => ({ label: `${a.name} — ${a.description}`, value: a.id }))}
-          />
-        )}
-      </Drawer>
+      />
 
       <Modal
         title="添加用户"
@@ -363,7 +330,7 @@ export default function Admin() {
         open={resetTarget !== null}
         onCancel={() => setResetTarget(null)}
         footer={
-          resetPassword_ ? (
+          resetPasswordValue ? (
             <Button type="primary" onClick={() => setResetTarget(null)}>
               完成
             </Button>
@@ -372,7 +339,13 @@ export default function Admin() {
               <Button key="cancel" onClick={() => setResetTarget(null)}>
                 取消
               </Button>,
-              <Button key="ok" type="primary" loading={resetting} icon={<ReloadOutlined />} onClick={() => void doResetPassword()}>
+              <Button
+                key="ok"
+                type="primary"
+                loading={resetting}
+                icon={<ReloadOutlined />}
+                onClick={() => void doResetPassword()}
+              >
                 确认重置
               </Button>,
             ]
@@ -380,11 +353,11 @@ export default function Admin() {
         }
         destroyOnClose
       >
-        {resetPassword_ ? (
+        {resetPasswordValue ? (
           <div style={{ fontSize: 13, lineHeight: 1.8 }}>
             <p style={{ margin: 0 }}>新密码已生成（该用户的全部登录态已失效）：</p>
-            <Typography.Paragraph copyable={{ text: resetPassword_ }} style={{ marginTop: 8 }}>
-              <code style={{ fontSize: 15, fontWeight: 700 }}>{resetPassword_}</code>
+            <Typography.Paragraph copyable={{ text: resetPasswordValue }} style={{ marginTop: 8 }}>
+              <code style={{ fontSize: 15, fontWeight: 700 }}>{resetPasswordValue}</code>
             </Typography.Paragraph>
             <p style={{ color: "var(--text-muted)", margin: 0 }}>点击密码旁的复制图标，安全送达用户后再关闭。</p>
           </div>

@@ -112,3 +112,62 @@ async def set_user_apps(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
     await db.commit()
     return UserAppsResponse(app_ids=result)
+
+
+# ── 三态授权：dept / role（user 在上方；契约 v2 §Admin 补齐） ─────────────────
+
+
+@router.get("/depts/{dept_id}/apps", response_model=UserAppsResponse)
+async def get_dept_apps(
+    dept_id: int,
+    _admin: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    app_ids = await service.get_principal_apps(db, "dept", dept_id)
+    if app_ids is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Department not found")
+    return UserAppsResponse(app_ids=app_ids)
+
+
+@router.put("/depts/{dept_id}/apps", response_model=UserAppsResponse)
+async def set_dept_apps(
+    dept_id: int,
+    body: UserAppsUpdate,
+    _admin: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await service.set_principal_apps(db, "dept", dept_id, body.app_ids)
+    if result == "UNKNOWN_APPS":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown app ids")
+    if result is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Department not found")
+    await db.commit()
+    return UserAppsResponse(app_ids=result)
+
+
+@router.get("/roles/{role_id}/apps", response_model=UserAppsResponse)
+async def get_role_apps(
+    role_id: int,
+    _admin: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    app_ids = await service.get_principal_apps(db, "role", role_id)
+    if app_ids is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Role not found")
+    return UserAppsResponse(app_ids=app_ids)
+
+
+@router.put("/roles/{role_id}/apps", response_model=UserAppsResponse)
+async def set_role_apps(
+    role_id: int,
+    body: UserAppsUpdate,
+    _admin: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await service.set_principal_apps(db, "role", role_id, body.app_ids)
+    if result == "UNKNOWN_APPS":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown app ids")
+    if result is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Role not found")
+    await db.commit()
+    return UserAppsResponse(app_ids=result)

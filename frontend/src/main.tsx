@@ -4,6 +4,7 @@ import { BrowserRouter } from "react-router-dom";
 import { ConfigProvider } from "antd";
 import zhCN from "antd/locale/zh_CN";
 import App from "./App";
+import ErrorBoundary from "./components/ErrorBoundary";
 import "./styles/global.css";
 
 import { USE_MOCKS } from "./config";
@@ -31,11 +32,13 @@ const theme = {
 enableMocking().then(() => {
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <React.StrictMode>
-      <ConfigProvider locale={zhCN} theme={theme}>
-        <BrowserRouter>
-          <App />
-        </BrowserRouter>
-      </ConfigProvider>
+      <ErrorBoundary scope="root">
+        <ConfigProvider locale={zhCN} theme={theme}>
+          <BrowserRouter>
+            <App />
+          </BrowserRouter>
+        </ConfigProvider>
+      </ErrorBoundary>
     </React.StrictMode>
   );
 });

@@ -120,3 +120,72 @@
 
 ## 前端展示语义
 - 思考面板：可折叠「思考过程」；生成中且尚无正文时默认展开，正文开始/流结束后默认收起；历史回放默认收起
+
+---
+
+# v7 增补（wave8 · orchestrator 批准 · 知识库）
+
+## 通用
+- 响应形状 = Dify Knowledge API **原样透传**（含 `data[]/total/has_more/page/limit`）
+- 鉴权：后端用独立的 `DIFY_DATASET_API_KEY`（工作区级，与 per-app key 是两套凭证）；未配置 → 503 `{"detail":"knowledge base service not configured"}`
+- 上游 4xx → 同码 + 精简 message；上游 5xx/网络错误 → 502 `{"detail":"knowledge service unavailable"}`
+
+## 端点（prefix /api/kb）
+| 端点 | 权限 | 说明 |
+|---|---|---|
+| GET /api/kb/datasets?page=&page_size= | 登录 | 知识库列表（透传） |
+| GET /api/kb/datasets/{id}/documents?page=&page_size=&keyword= | 登录 | 文档列表（含 `indexing_status`；前端对未终态文档 5s 轮询） |
+| POST /api/kb/datasets/{id}/documents/text `{"name","text","indexing_technique"}` | PLATFORM_ADMIN | 201 透传 create-by-text 响应 |
+| POST /api/kb/datasets/{id}/documents/file（multipart：`file` + `indexing_technique` 表单域） | PLATFORM_ADMIN | ≤20MB；文档类 MIME 白名单（pdf/docx/pptx/xlsx/txt/md/csv/html/json）；201 透传 |
+| DELETE /api/kb/datasets/{id}/documents/{document_id} | PLATFORM_ADMIN | 204 |
+| POST /api/kb/datasets/{id}/retrieve `{"query"}` | 登录 | 命中测试，透传 `{query:{...}, records:[{score,segment:{content,document:{name}}}]}`（records 为顶层字段） |
+
+## 语义与边界
+- `indexing_technique`（high_quality|economy）必须与目标库一致；由前端从 datasets 列表取值透传
+- App↔知识库的**绑定**只能在 Dify 控制台完成（Service API 无此能力）；门户 /kb = 文档管理 + 检索测试
+- Dataset key 作用域 = 创建该 key 的成员可见的库；知识库需在 Dify 控制台授权全员后才对平台可见
+- 操作审计：后端结构化日志（user/dataset/doc id），不落库
+
+---
+
+# v8 增补（wave9 · orchestrator 批准 · 知识库租户隔离）
+
+## 语义
+- 隔离在**网关层**实现（Dify 侧仍是工作区级 key，所有门户用户共享一个上游身份）
+- `dataset_authorizations` 表：dataset_id（Dify UUID，无本地外键）× principal（user/dept/role 三态，同 app_authorizations）
+- 可见 = 用户直授 ∪ 所属部门 ∪ 拥有角色；PLATFORM_ADMIN 不受限（恒全量）
+- **默认关闭**：无任何授权记录的知识库对非管理员不可见；列表过滤 + 作用域端点（documents/上传/删除/retrieve）一律 403 `{"detail":"Not authorized for this dataset"}`
+
+## 端点变更
+- GET /api/kb/datasets：非管理员仅返回授权集合内的库（data 过滤、total 重算；分页取上游页后过滤，内部规模下语义等价）
+- 其余 /api/kb/datasets/{id}/* 端点：入口统一过 `_require_dataset_access` 门
+
+## Admin 新增（仅 PLATFORM_ADMIN）
+- GET /api/admin/users/{id}/datasets → `{"dataset_ids":["<dify-uuid>"]}`
+- PUT /api/admin/users/{id}/datasets `{"dataset_ids":[...]}` → 200（用户级全量替换；dataset_id 不做本地存在性校验——Dify 是真相源，前端仅从实际目录勾选）
+
+---
+
+# v9 增补（wave10 · orchestrator 批准 · 库级管理与审计）
+
+## 端点（kb 前缀，除注明外均 PLATFORM_ADMIN）
+| 端点 | 说明 |
+|---|---|
+| POST /api/kb/datasets `{"name","indexing_technique"?}` | 建空知识库 → 201 透传 Dify dataset |
+| DELETE /api/kb/datasets/{id} | 删库 → 204；本地授权行同步清理 |
+| GET /api/kb/datasets/{id}/grants | 该库三态授权全量 → `{"items":[{principal_type,principal_id,name}]}`（name 为主体名称，已删主体为 null） |
+| POST /api/kb/datasets/{id}/grants `{"principal_type","principal_id"}` | 单条授权（幂等 upsert）；主体不存在 → 404 |
+| DELETE /api/kb/datasets/{id}/grants/{principal_type}/{principal_id} | 移除单条授权（幂等）→ 204 |
+| GET /api/kb/audit?page=&page_size= | 审计流水（新在前）→ `{"total","items":[{id,user,action,dataset_id,detail,created_at}]}` |
+
+## 目录端点（授权选择器数据源）
+- GET /api/admin/depts → `{"items":[{id,name}]}`
+- GET /api/admin/roles → `{"items":[{id,code,name}]}`
+
+## 审计语义
+- 表 kb_audit_logs：user_id（无外键，用户删除后仍可追溯）/ action / dataset_id / detail(JSON) / created_at
+- 记录动作：dataset_create / dataset_delete / doc_create_text / doc_create_file / doc_delete / grant_add / grant_remove
+- 与主操作同事务提交；用户级全量替换端点（PUT /admin/users/{id}/datasets）不逐条审计
+
+## 前端观感
+- 思考过程面板与正文统一走打字机平滑（useTypewriter）

@@ -16,10 +16,14 @@
 #                      openssl rand -base64 32 | tr '/+' '_-'
 #                      (equivalent to Fernet.generate_key(); avoids needing
 #                       python3+cryptography on the server)
+# Non-secret defaults (COOKIE_SECURE=false for plain-HTTP phase; ALLOWED_ORIGINS
+# derived from PORTAL_PORT — override with PORTAL_PORT=8180 remote-env.sh)
 set -euo pipefail
 
 REMOTE_HOST="${REMOTE_HOST:-root@192.168.20.226}"
 REMOTE_DIR="${REMOTE_DIR:-/root/agent-platform}"
+# 门户端口单一来源：PORTAL_PORT 与 ALLOWED_ORIGINS 均由它推导，消灭双处硬编码漂移
+PORTAL_PORT="${PORTAL_PORT:-8080}"
 FORCE="${1:-}"
 
 if [ "$FORCE" != "--force" ]; then
@@ -41,9 +45,11 @@ ssh "$REMOTE_HOST" "mkdir -p '$REMOTE_DIR' && umask 077 && printf '%s\n' \
   \"JWT_SECRET=\$(openssl rand -base64 32 | tr -d '\n')\" \
   \"ENCRYPTION_KEY=\$(openssl rand -base64 32 | tr '/+' '_-')\" \
   'DIFY_BASE_URL=http://192.168.20.226' \
-  'PORTAL_PORT=8080' \
-  'ALLOWED_ORIGINS=http://192.168.20.226:8080' \
+  "PORTAL_PORT=$PORTAL_PORT" \
+  "ALLOWED_ORIGINS=http://192.168.20.226:$PORTAL_PORT" \
   'DEBUG=false' \
+  '# 纯 HTTP 阶段必须 false，否则 Secure cookie 被浏览器拒收（登录即失效）；TLS 就绪后删除此行使缺省生效' \
+  'COOKIE_SECURE=false' \
   > '$REMOTE_DIR/.env' && chmod 600 '$REMOTE_DIR/.env' && echo 'env written (mode 600)'"
 
 echo "==> done. next: deploy/scripts/build-ship.sh then deploy/scripts/remote-up.sh"

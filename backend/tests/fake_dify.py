@@ -94,6 +94,23 @@ def exploding_dify_client(first_chunk: bytes) -> DifyClient:
     return DifyClient(base_url="http://fake-dify", transport=httpx.MockTransport(handler))
 
 
+def slow_dify_client(body: bytes, frame_delay: float = 0.05) -> DifyClient:
+    """逐帧延迟的流（真实网络形态）—— 供取消/断流时序测试（B1）。"""
+    import anyio
+
+    frames = body.split(b"\n\n")
+
+    async def stream() -> AsyncIterator[bytes]:
+        for frame in frames:
+            await anyio.sleep(frame_delay)
+            yield frame + b"\n\n"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=stream(), headers={"content-type": "text/event-stream"})
+
+    return DifyClient(base_url="http://fake-dify", transport=httpx.MockTransport(handler))
+
+
 # ── 工作流模式（契约 v3；事件形状取自 docs/fixtures 真实样本）──────────────
 
 # 正常流：ping/started/node 系 + 2 段 text_chunk + 成功 workflow_finished

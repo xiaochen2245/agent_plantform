@@ -3,6 +3,7 @@ import { Button, Empty, Select, Spin } from "antd";
 import { useEffect, useRef } from "react";
 import Composer from "../components/Composer";
 import MessageItem from "../components/MessageItem";
+import ErrorBoundary from "../components/ErrorBoundary";
 import WorkflowComposer from "../components/WorkflowComposer";
 import { useChatStore } from "../stores/chat";
 
@@ -24,15 +25,33 @@ export default function Chat() {
   const isWorkflow =
     activeApp?.mode === "workflow" && (activeApp.inputs_schema?.length ?? 0) > 0;
 
-  const bottomRef = useRef<HTMLDivElement>(null);
+  // F1：滚动只作用于线程容器本身（原 scrollIntoView 会滚 window，与外层 overflow:hidden 打架）
+  const threadRef = useRef<HTMLDivElement>(null);
+  // F3：首次挂载只恢复一次（切 Agent / 「新对话」不重触发）
+  const resumedRef = useRef(false);
 
   useEffect(() => {
     void loadApps();
   }, [loadApps]);
 
+  // F3：刷新/重进后恢复该应用最近会话，多轮上下文不再断链
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages]);
+    if (appsLoading || resumedRef.current || !activeApp) return;
+    resumedRef.current = true;
+    if (useChatStore.getState().activeConversationId) return;
+    void useChatStore.getState().resumeLatest(activeApp.id);
+  }, [appsLoading, activeApp]);
+
+  useEffect(() => {
+    const el = threadRef.current;
+    if (!el) return;
+    // 流式期间用即时滚动（跟随节流后的刷新节奏），新消息用平滑滚动；jsdom 无 scrollTo 时回退赋值
+    if (typeof el.scrollTo === "function") {
+      el.scrollTo({ top: el.scrollHeight, behavior: streaming ? "auto" : "smooth" });
+    } else {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [messages, streaming]);
 
   return (
     <div className="chat-main">
@@ -57,7 +76,7 @@ export default function Chat() {
             新对话
           </Button>
       </div>
-      <div className="chat-thread">
+      <div className="chat-thread" ref={threadRef} data-testid="chat-thread">
           {appsLoading && messages.length === 0 ? (
             <div style={{ display: "flex", justifyContent: "center", marginTop: 120 }}>
               <Spin />
@@ -87,10 +106,11 @@ export default function Chat() {
             </div>
           ) : (
             <div className="thread-col">
-              {messages.map((m) => (
-                <MessageItem key={m.id} message={m} onRetry={() => void retryLast()} streaming={streaming} />
-              ))}
-              <div ref={bottomRef} />
+              <ErrorBoundary scope="local">
+                {messages.map((m) => (
+                  <MessageItem key={m.id} message={m} onRetry={() => void retryLast()} streaming={streaming} />
+                ))}
+              </ErrorBoundary>
             </div>
           )}
       </div>

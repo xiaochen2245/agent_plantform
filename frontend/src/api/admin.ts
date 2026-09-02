@@ -70,6 +70,15 @@ export async function putUserApps(id: number, appIds: number[]): Promise<void> {
   await http.put(`/admin/users/${id}/apps`, { app_ids: appIds });
 }
 
+/** 契约 v8：用户级知识库授权（dataset_id 为 Dify 侧 UUID；勾选入口在知识库页授权抽屉）。 */
+export async function getUserDatasets(id: number): Promise<{ dataset_ids: string[] }> {
+  return (await http.get<{ dataset_ids: string[] }>(`/admin/users/${id}/datasets`)).data;
+}
+
+export async function putUserDatasets(id: number, datasetIds: string[]): Promise<void> {
+  await http.put(`/admin/users/${id}/datasets`, { dataset_ids: datasetIds });
+}
+
 // ── 部门管理 ────────────────────────────────────────────────────────────────
 
 export interface AdminDept {

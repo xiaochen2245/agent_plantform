@@ -19,6 +19,14 @@ test("登录成功 → 跳转首页（对话工作台）", async ({ page }) => {
   await expect(page.getByRole("button", { name: "新对话" })).toBeVisible();
 });
 
+test("登录后整页刷新仍在线（A1 会话引导，不再误踢回登录）", async ({ page }) => {
+  await login(page, "admin@company.com", "admin123");
+  await expect(page).toHaveURL(/\/$/);
+  await page.reload();
+  await expect(page).toHaveURL(/\/$/, { timeout: 15_000 });
+  await expect(page.getByRole("button", { name: "新对话" })).toBeVisible({ timeout: 15_000 });
+});
+
 test("错误密码 → 停留登录页并显示错误提示", async ({ page }) => {
   await login(page, "admin@company.com", "wrong-password");
   await expect(page).toHaveURL(/\/login$/);

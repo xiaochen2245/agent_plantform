@@ -245,6 +245,7 @@ describe("管理后台（契约 v2 真实端点交互）", () => {
     });
     const baoxiao = screen.getByRole("checkbox", { name: /报销政策问答/ }) as HTMLInputElement;
     expect(baoxiao.checked).toBe(true);
+    // 知识库授权（契约 v8/v9）已迁至知识库页的库级授权抽屉，此处不再断言
 
     // 勾选 IT 运维助手 → 保存 → PUT {app_ids:[1,2]}
     fireEvent.click(screen.getByRole("checkbox", { name: /IT 运维助手/ }));

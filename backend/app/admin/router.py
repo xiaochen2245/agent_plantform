@@ -13,9 +13,14 @@ from app.schemas.admin import (
     ResetPasswordResponse,
     UserAppsResponse,
     UserAppsUpdate,
+    UserDatasetsResponse,
+    UserDatasetsUpdate,
 )
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+
+
 
 
 @router.get("/users", response_model=AdminUsersResponse)
@@ -114,6 +119,31 @@ async def set_user_apps(
     return UserAppsResponse(app_ids=result)
 
 
+@router.get("/users/{user_id}/datasets", response_model=UserDatasetsResponse)
+async def get_user_datasets(
+    user_id: int,
+    _admin: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """契约 v8：用户级知识库授权（租户隔离映射）。"""
+    dataset_ids = await service.get_user_datasets(db, user_id)
+    if dataset_ids is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    return UserDatasetsResponse(dataset_ids=dataset_ids)
+
+
+@router.put("/users/{user_id}/datasets", response_model=UserDatasetsResponse)
+async def set_user_datasets(
+    user_id: int,
+    body: UserDatasetsUpdate,
+    _admin: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await service.set_user_datasets(db, user_id, body.dataset_ids)
+    if result is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    await db.commit()
+    return UserDatasetsResponse(dataset_ids=result)
 # ── 三态授权：dept / role（user 在上方；契约 v2 §Admin 补齐） ─────────────────
 
 

@@ -25,9 +25,12 @@ services:
     restart: unless-stopped
 
   backend:
+    image: agent-platform-backend:latest  # 与 prebuilt compose 同名，服务器侧构建/本机构建产物互通
     build:
       context: ../backend
       dockerfile: Dockerfile
+      args:
+        APP_VERSION: ${GIT_SHA:-dev}
     container_name: ap-backend
     env_file:
       - path: .env
@@ -36,6 +39,9 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:-agent_dev_only}@postgres:5432/${POSTGRES_DB:-agent_platform}
     expose:
       - "8000"
+    volumes:
+      # 上传附件持久化：UPLOAD_DIR 缺省 uploads（相对 /app）→ 命名卷，重部署不丢
+      - ap_uploads:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -48,11 +54,14 @@ services:
     restart: unless-stopped
 
   frontend:
+    image: agent-platform-frontend:latest  # 同上
     # Multi-stage image owned by slice s2: node:20 build -> nginx:1.25-alpine + dist.
     # Routing config stays in this slice: bind-mounted over the stock conf.d entry.
     build:
       context: ../frontend
       dockerfile: Dockerfile
+      args:
+        BUILD_SHA: ${GIT_SHA:-dev}
     container_name: ap-frontend
     # Coexist with Dify on the same host: Dify keeps :80/:3000, our portal
     # listens on PORTAL_PORT (default 8080). Set via deploy/.env
@@ -67,3 +76,5 @@ services:
 
 volumes:
   postgres_data:
+  # 上传附件（backend UPLOAD_DIR=/app/uploads）
+  ap_uploads:

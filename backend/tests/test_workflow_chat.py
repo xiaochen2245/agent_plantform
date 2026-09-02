@@ -146,3 +146,44 @@ async def test_seed_app4_idempotent(client: AsyncClient):
         apps = list((await s.execute(select(App))).scalars())
     assert len([a for a in apps if a.dify_app_id == "app-test-004"]) == 1
     assert len(apps) == 4
+
+
+# ── B2：workflow 失败原文脱敏（防节点名/内网 URL/堆栈泄露）──────────────────
+def test_summarize_upstream_error_unit():
+    from app.chat.service import _summarize_upstream_error
+
+    nasty = (
+        "GET http://10.0.0.5:5001/workflows/run failed\n"
+        + "  File \"/app/api/core/workflow/nodes/llm/LLMNode.py\", line 233, in _run "
+        + "traceback frame " * 20  # 超长堆栈行，应整行丢弃
+        + "\nnode LLM-2 api key invalid"
+    )
+    out = _summarize_upstream_error(nasty)
+    assert "LLM-2 api key invalid" in out
+    assert "10.0.0.5" not in out and "http" not in out  # URL 被剥
+    assert "LLMNode.py" not in out  # 超长堆栈行被丢
+    assert _summarize_upstream_error("") == "workflow failed"
+    assert len(_summarize_upstream_error("x" * 500)) == 200  # 截断
+
+
+async def test_workflow_failed_error_event_sanitized(client: AsyncClient):
+    """端到端：失败流的事件消息带前缀 + 无内部 URL（契约形状不变）。"""
+    from tests.fake_dify import sse_events
+
+    nasty = sse_events(
+        ("workflow_finished",
+         {"task_id": "t-3", "data": {
+             "status": "failed", "total_tokens": 0,
+             "error": "node LLM-2 call https://internal.llm.local/v1 failed: 401",
+         }}),
+    )
+    _use(fake_dify_client(nasty))
+    await login(client)
+
+    lines = await _send_workflow(client, {"business_card": "赵六"})
+    events = _events(lines)
+    assert events[0][0] == "error"
+    msg = events[0][1]["message"]
+    assert msg.startswith("上游工作流执行失败:")
+    assert "internal.llm.local" not in msg and "https://" not in msg
+    assert "401" in msg  # 有效信息保留

@@ -270,7 +270,11 @@ async def test_create_and_delete_dataset_with_grant_cleanup(client: AsyncClient)
         "/api/kb/datasets", json={"name": "新建测试库", "indexing_technique": "economy"}
     )
     assert resp.status_code == 201
-    assert captured[0]["json"] == {"name": "新建测试库", "indexing_technique": "economy"}
+    assert captured[0]["json"] == {
+        "name": "新建测试库",
+        "indexing_technique": "economy",
+        "permission": "all_team_members",  # 建库即全员可见（Dify 控制台同步可见）
+    }
 
     # 授权一条 → 删库 → 授权行与审计同步
     await client.put("/api/admin/users/1/datasets", json={"dataset_ids": ["ds-1"]})

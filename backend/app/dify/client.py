@@ -202,11 +202,22 @@ class DifyClient:
         )
         self._check_dataset_resp(resp)
 
-    async def create_dataset(self, name: str, indexing_technique: str = "high_quality") -> dict:
-        """建空知识库（契约 v9）；返回的 dataset 含 id/indexing_technique。"""
+    async def create_dataset(
+        self, name: str, indexing_technique: str = "high_quality"
+    ) -> dict:
+        """建空知识库（契约 v9）。
+
+        permission=all_team_members：API 建库缺省“仅我可编辑”，归属创建 key 的
+        成员——其他成员在 Dify 控制台看不到。显式带全员权限，平台建的库在
+        Dify 侧也人人可见（实测社区版 1.17 接受该参数）。
+        """
         resp = await self._client.post(
             "/v1/datasets",
-            json={"name": name, "indexing_technique": indexing_technique},
+            json={
+                "name": name,
+                "indexing_technique": indexing_technique,
+                "permission": "all_team_members",
+            },
             headers=self._dataset_headers(),
         )
         return self._check_dataset_resp(resp)

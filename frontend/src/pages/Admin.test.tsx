@@ -81,6 +81,15 @@ const server = setupServer(
     USERS.push(created);
     return HttpResponse.json(created, { status: 201 });
   }),
+  // 角色目录（设置角色/新建用户弹窗懒加载）
+  mswHttp.get("http://localhost/api/admin/roles", () =>
+    HttpResponse.json({
+      items: [
+        { id: 1, code: "USER", name: "普通用户" },
+        { id: 2, code: "PLATFORM_ADMIN", name: "平台管理员" },
+      ],
+    })
+  ),
   mswHttp.post("http://localhost/api/admin/users/:id/reset_password", ({ params }) => {
     const user = USERS.find((u) => u.id === Number(params.id));
     if (!user) return HttpResponse.json({ detail: "Not found" }, { status: 404 });

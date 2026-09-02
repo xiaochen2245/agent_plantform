@@ -25,6 +25,7 @@ services:
     restart: unless-stopped
 
   backend:
+    image: agent-platform-backend:latest  # 与 prebuilt compose 同名，服务器侧构建/本机构建产物互通
     build:
       context: ../backend
       dockerfile: Dockerfile
@@ -51,6 +52,7 @@ services:
     restart: unless-stopped
 
   frontend:
+    image: agent-platform-frontend:latest  # 同上
     # Multi-stage image owned by slice s2: node:20 build -> nginx:1.25-alpine + dist.
     # Routing config stays in this slice: bind-mounted over the stock conf.d entry.
     build:

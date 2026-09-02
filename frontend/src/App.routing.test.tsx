@@ -42,10 +42,10 @@ describe("路由守卫与侧栏权限渲染", () => {
     );
     // 重定向回首页：聊天空态出现（等 apps 加载完），管理表格不出现
     expect(await screen.findByText(/提出你的第一个问题|选择上方 Agent/)).toBeTruthy();
-    expect(screen.queryByText("用户与授权")).toBeNull();
+    expect(screen.queryByText("权限管理")).toBeNull();
   });
 
-  it("PLATFORM_ADMIN 可见侧栏「用户与授权」入口并进入 /admin", () => {
+  it("PLATFORM_ADMIN 可见侧栏「权限管理」入口并进入 /admin", () => {
     setLocation(ADMIN);
     render(
       <MemoryRouter initialEntries={["/admin"]}>
@@ -55,7 +55,7 @@ describe("路由守卫与侧栏权限渲染", () => {
     );
     expect(screen.getByTestId("location").textContent).toBe("/admin");
     // 侧栏入口 + 页面标题都在（同名两处）
-    expect(screen.getAllByText("用户与授权").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("权限管理").length).toBeGreaterThanOrEqual(2);
   });
 
   it("普通员工侧栏不渲染「管 理」分区", () => {

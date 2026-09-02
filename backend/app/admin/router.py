@@ -1,13 +1,10 @@
 """Admin 路由：用户管理 + 用户级 App 授权（仅 PLATFORM_ADMIN，契约 v2 §Admin）。"""
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin import service
 from app.auth.deps import require_platform_admin
 from app.db.session import get_db
-from app.models.department import Department
-from app.models.role import Role
 from app.models.user import User
 from app.schemas.admin import (
     AdminUserCreate,
@@ -23,24 +20,7 @@ from app.schemas.admin import (
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
-@router.get("/depts")
-async def list_depts(
-    _admin: User = Depends(require_platform_admin),
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    """契约 v9：部门目录（知识库授权选择器数据源；全量不分页，内部规模）。"""
-    rows = (await db.execute(select(Department).order_by(Department.id))).scalars().all()
-    return {"items": [{"id": d.id, "name": d.name} for d in rows]}
 
-
-@router.get("/roles")
-async def list_roles(
-    _admin: User = Depends(require_platform_admin),
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    """契约 v9：角色目录（同上）。"""
-    rows = (await db.execute(select(Role).order_by(Role.id))).scalars().all()
-    return {"items": [{"id": r.id, "code": r.code, "name": r.name} for r in rows]}
 
 
 @router.get("/users", response_model=AdminUsersResponse)
@@ -164,3 +144,60 @@ async def set_user_datasets(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
     await db.commit()
     return UserDatasetsResponse(dataset_ids=result)
+# ── 三态授权：dept / role（user 在上方；契约 v2 §Admin 补齐） ─────────────────
+
+
+@router.get("/depts/{dept_id}/apps", response_model=UserAppsResponse)
+async def get_dept_apps(
+    dept_id: int,
+    _admin: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    app_ids = await service.get_principal_apps(db, "dept", dept_id)
+    if app_ids is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Department not found")
+    return UserAppsResponse(app_ids=app_ids)
+
+
+@router.put("/depts/{dept_id}/apps", response_model=UserAppsResponse)
+async def set_dept_apps(
+    dept_id: int,
+    body: UserAppsUpdate,
+    _admin: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await service.set_principal_apps(db, "dept", dept_id, body.app_ids)
+    if result == "UNKNOWN_APPS":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown app ids")
+    if result is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Department not found")
+    await db.commit()
+    return UserAppsResponse(app_ids=result)
+
+
+@router.get("/roles/{role_id}/apps", response_model=UserAppsResponse)
+async def get_role_apps(
+    role_id: int,
+    _admin: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    app_ids = await service.get_principal_apps(db, "role", role_id)
+    if app_ids is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Role not found")
+    return UserAppsResponse(app_ids=app_ids)
+
+
+@router.put("/roles/{role_id}/apps", response_model=UserAppsResponse)
+async def set_role_apps(
+    role_id: int,
+    body: UserAppsUpdate,
+    _admin: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await service.set_principal_apps(db, "role", role_id, body.app_ids)
+    if result == "UNKNOWN_APPS":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown app ids")
+    if result is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Role not found")
+    await db.commit()
+    return UserAppsResponse(app_ids=result)

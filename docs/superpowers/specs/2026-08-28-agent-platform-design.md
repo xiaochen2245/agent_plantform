@@ -679,7 +679,7 @@ MVP 至少保证**日志结构化**：
 
 ### 待办
 - [ ] 选定部署机器规格（FastAPI 2 实例至少 2C4G，**Dify 至少 8C16G——官方镜像内嵌 Postgres + Redis 很重，生产必须外部化**）
-- [ ] 选定 Dify 镜像版本（锁定次版本号，定期升级）
+- [ ] 选定 Dify 镜像版本（**只取后端**：dify-api / dify-sandbox / dify-plugin-daemon / dify-plugin-runtime，**不要 dify-web 与 Dify 自带 nginx**；锁定次版本号，定期升级）
 - [ ] Dify API Key 轮转策略（建议 90 天）
 - [ ] **离职联动禁用 Dify 账号的实现路径确认**：
   - 优先：调研 Dify 社区版"禁用账号"管理 API 是否真的存在（查 Swagger）

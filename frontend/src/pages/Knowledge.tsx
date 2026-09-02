@@ -241,16 +241,19 @@ export default function Knowledge() {
     }
   }, [grantsOpen, loadGrants]);
 
-  // 切换主体类型时拉取对应目录（用户走搜索接口取首页，内部规模够用）
+  // 抽屉打开时才拉对应目录（避免页面加载即发无谓请求）；用户走搜索接口取首页
   useEffect(() => {
+    if (!grantsOpen) return;
     let cancelled = false;
     (async () => {
       try {
         let opts: { label: string; value: number }[] = [];
         if (grantType === "dept") {
-          opts = (await listDepts()).map((d) => ({ label: d.name, value: d.id }));
+          const { items } = await listDepts();
+          opts = items.map((d) => ({ label: d.name, value: d.id }));
         } else if (grantType === "role") {
-          opts = (await listRoles()).map((r) => ({ label: `${r.name}（${r.code}）`, value: r.id }));
+          const { items } = await listRoles();
+          opts = items.map((r) => ({ label: `${r.name}（${r.code}）`, value: r.id }));
         } else {
           const page = await listUsers({ page: 1, page_size: 100 });
           opts = page.items.map((u) => ({ label: `${u.name}（${u.email}）`, value: u.id }));
@@ -263,7 +266,7 @@ export default function Knowledge() {
     return () => {
       cancelled = true;
     };
-  }, [grantType]);
+  }, [grantsOpen, grantType]);
 
   const submitAddGrant = async () => {
     if (!selected || grantTarget == null) return;

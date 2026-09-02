@@ -515,12 +515,4 @@ export const handlers = [
       ],
     })
   ),
-
-  mswHttp.get("/api/admin/depts", () =>
-    HttpResponse.json({ items: [{ id: 1, name: "信息技术部" }] })
-  ),
-
-  mswHttp.get("/api/admin/roles", () =>
-    HttpResponse.json({ items: [{ id: 2, code: "USER", name: "员工" }] })
-  ),
 ];

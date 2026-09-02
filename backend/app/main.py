@@ -16,6 +16,8 @@ from app.chat.router import router as chat_router
 from app.core.config import get_app_version, settings
 from app.core.middleware import CSRFMiddleware
 from app.conversations.router import router as conversations_router
+from app.depts.router import router as depts_router
+from app.roles.router import router as roles_router
 from app.db.init import dispose_engine, init_db
 from app.db.session import SessionLocal
 from app.dify.client import DifyClient, app_api_key
@@ -85,6 +87,8 @@ app.include_router(chat_router)
 app.include_router(files_router)
 app.include_router(kb_router)
 app.include_router(conversations_router)
+app.include_router(depts_router)
+app.include_router(roles_router)
 app.include_router(admin_router)
 
 

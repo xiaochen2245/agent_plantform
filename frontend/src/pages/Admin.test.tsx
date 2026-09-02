@@ -44,7 +44,6 @@ const listCalls: Array<{ query: string | null; status: string | null; page: stri
 const patchBodies: Array<{ id: string; body: Record<string, unknown> }> = [];
 const createBodies: Array<Record<string, unknown>> = [];
 const putAppBodies: Array<{ id: string; appIds: number[] }> = [];
-const putDatasetBodies: Array<{ id: string; datasetIds: string[] }> = [];
 
 const server = setupServer(
   ...handlers,
@@ -95,15 +94,6 @@ const server = setupServer(
     const body = (await request.json()) as { app_ids?: number[] };
     putAppBodies.push({ id: String(params.id), appIds: body.app_ids ?? [] });
     USER_APPS[Number(params.id)] = body.app_ids ?? [];
-    return HttpResponse.json({ ok: true });
-  }),
-  // 契约 v8：用户级知识库授权（初始授权 ds-eco-1，验证勾选回显与 PUT 载荷）
-  mswHttp.get("http://localhost/api/admin/users/:id/datasets", () =>
-    HttpResponse.json({ dataset_ids: ["ds-eco-1"] })
-  ),
-  mswHttp.put("http://localhost/api/admin/users/:id/datasets", async ({ request, params }) => {
-    const body = (await request.json()) as { dataset_ids?: string[] };
-    putDatasetBodies.push({ id: String(params.id), datasetIds: body.dataset_ids ?? [] });
     return HttpResponse.json({ ok: true });
   })
 );
@@ -255,9 +245,7 @@ describe("管理后台（契约 v2 真实端点交互）", () => {
     });
     const baoxiao = screen.getByRole("checkbox", { name: /报销政策问答/ }) as HTMLInputElement;
     expect(baoxiao.checked).toBe(true);
-    // 知识库授权区（契约 v8）：目录来自公共 mock 的 ds-eco-1，当前授权回显勾选
-    const kb = await screen.findByRole("checkbox", { name: /General Mode-ECO 1/ }) as HTMLInputElement;
-    expect(kb.checked).toBe(true);
+    // 知识库授权（契约 v8/v9）已迁至知识库页的库级授权抽屉，此处不再断言
 
     // 勾选 IT 运维助手 → 保存 → PUT {app_ids:[1,2]}
     fireEvent.click(screen.getByRole("checkbox", { name: /IT 运维助手/ }));
@@ -267,6 +255,5 @@ describe("管理后台（契约 v2 真实端点交互）", () => {
       expect(putAppBodies).toHaveLength(1);
     });
     expect(putAppBodies[0]).toEqual({ id: "2", appIds: [1, 2] });
-    expect(putDatasetBodies[0]).toEqual({ id: "2", datasetIds: ["ds-eco-1"] }); // 未变更也全量提交
   });
 });

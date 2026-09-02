@@ -128,12 +128,12 @@ Dify 的所有镜像都在 Docker Hub 的 `langgenius/` 命名空间下，**不�
 
 | 镜像 | 版本标签 | 用途 |
 |---|---|---|
-| `langgenius/dify-api` | `1.1.0` | Dify API 服务 |
-| `langgenius/dify-web` | `1.1.0` | Dify Web UI |
+| `langgenius/dify-api` | `1.1.0` | Dify API 服务（本项目后端通过 `DIFY_BASE_URL` 调用） |
 | `langgenius/dify-sandbox` | `0.2.1` | 代码执行沙箱 |
-| `langgenius/dify-plugin-daemon` | `0.0.2-local` | 插件运行时 |
+| `langgenius/dify-plugin-daemon` | `0.0.2-local` | 插件守护进程 |
 | `langgenius/dify-plugin-runtime` | `0.0.2-local` | 插件运行时 |
-| `nginx` | `latest`（Dify 自带） | Dify 自带的反向代理 |
+
+**注意**：本项目**不部署 Dify 的管理前端**。业务用户使用本项目自研的 FastAPI + 前端门户直接调用 `dify-api`，管理员需要的编排/调试能力通过本项目封装的管理后台提供，因此 `langgenius/dify-web` 与 Dify 自带的 `nginx` 反代 **都不需要拉取**。如果是从官方克隆整份 `docker-compose.yaml` 部署的，需要把其中的 `web` 与 `nginx` 服务注释掉，避免 3000 端口无谓暴露。
 
 **镜像版本锁定方法**：
 
@@ -292,17 +292,18 @@ docker info | grep -A 5 "Registry Mirrors"
 |---|---|---|
 | 5432 | Postgres | docker: ap-postgres |
 | 5001 | Dify API | docker: dify-api |
-| 3000 | Dify Web UI | docker: dify-web |
 | 6379 | Dify 内置 Redis | docker: dify-redis |
 | 8000 | FastAPI 后端（dev） | 本机 uvicorn |
 | 5173 | Vite 前端（dev） | 本机 vite dev |
 | 80/443 | Nginx（生产） | docker: ap-nginx |
 
+> **不再暴露 Dify Web UI 的 3000 端口** —— 前端门户直接对接 `dify-api:5001`，由 `ap-nginx` 反代给浏览器，不经 Dify 自带前端。
+
 **冲突检查**：
 
 ```bash
 # Linux/macOS
-for port in 5432 5001 3000 6379 8000 5173; do
+for port in 5432 5001 6379 8000 5173; do
   lsof -i :$port || echo "$port: free"
 done
 ```
@@ -315,17 +316,16 @@ done
 
 ```
 deploy/
-├── docker-compose.yml          # 主编排（Postgres + Dify + Nginx + 后端 + 前端）
+├── docker-compose.yml          # 主编排（Postgres + 后端 + 前端 + ap-nginx）
 ├── docker-compose.override.yml # 本地开发覆盖（dev 配置、挂载代码）
 ├── .env.example
 ├── nginx/
-│   └── conf.d/portal.conf
+│   └── conf.d/portal.conf      # 反代 FastAPI（8000）+ Dify API（5001），不再代理 Dify Web
 ├── dify/                       # Dify 官方 compose（vendored 或子模块）
-│   ├── docker-compose.yaml
+│   ├── docker-compose.yaml     # 需注释掉 web / nginx 服务
 │   └── .env.example
 └── scripts/
-    ├── init-dify.sh            # 初始化 Dify 管理员
-    └── seed-admin.sh           # 创建 PLATFORM_ADMIN
+    └── seed-admin.sh           # 创建 PLATFORM_ADMIN；Dify 管理员通过 API 初始化（无 UI）
 ```
 
 ### 5.2 docker-compose.yml（开发模式）
@@ -333,9 +333,10 @@ deploy/
 > **注**：Dify 推荐用其官方 compose，本项目 `deploy/docker-compose.yml` 只声明本项目自己的服务，**Dify 单独部署**。
 
 **为什么不把 Dify 放进本项目 compose？**
-- Dify 官方 compose 自带 Postgres + Redis + 5 个微服务（api/worker/web/nginx/SSRF proxy），耦合度高
+- Dify 官方 compose 自带 Postgres + Redis + 6 个微服务（api/worker/web/nginx/SSRF proxy/sandbox），耦合度高
 - 升级 Dify 时只想替换它的目录，不希望牵连本项目
 - 本项目开发者经常需要单独重启 FastAPI，不希望连带重启 Dify
+- 本项目**只用 Dify 的后端 API**（`dify-api`），浏览器侧由本项目 `ap-nginx` 反代到 `dify-api:5001`；因此 `web`（3000）和 Dify 自带的 `nginx` 服务要**注释掉**，避免端口无谓暴露
 
 **本项目 compose 启动的服务**：
 
@@ -677,7 +678,7 @@ curl http://localhost:8000/api/health
 
 **解决**：本项目 `pyproject.toml` 已配 `asyncio_mode = "auto"` + session-scope event_loop fixture，如仍报错，检查是否有 sync fixture 误用了 async session。
 
-### Q9: Dify Web UI 进不去
+### Q9: 调用 dify-api 报 401 / connection refused
 
 ```bash
 # 检查所有 Dify 服务是否 healthy
@@ -687,7 +688,10 @@ docker compose -f docker-compose.yaml ps
 docker compose -f docker-compose.yaml logs --tail=100 api
 ```
 
-常见原因：Postgres 没外部化配置正确 / 端口冲突。
+常见原因：
+- Dify 还没完成初始化（首次启动需 1–2 分钟）
+- `DIFY_BASE_URL` 在容器内用了 `localhost:5001`，应改为 `http://dify-api:5001` 或 `http://host.docker.internal:5001`
+- Postgres 没外部化配置正确 / 端口冲突
 
 ---
 
@@ -697,8 +701,8 @@ docker compose -f docker-compose.yaml logs --tail=100 api
 
 - [ ] `docker --version` ≥ 24.0
 - [ ] `docker compose up -d postgres` 成功，`pg_isready` 通过
-- [ ] `docker compose -f docker-compose.yaml up -d` (Dify) 全部 healthy
-- [ ] 浏览器访问 http://localhost/install 能进 Dify 初始化页
+- [ ] `docker compose -f docker-compose.yaml up -d` (Dify) `dify-api` 处于 healthy（`web`/`nginx` 服务已注释，不要求存在）
+- [ ] `curl http://localhost:5001/v1/setup/initialize-status` 返回 `{"finished": false}`（首次）
 - [ ] `alembic upgrade head` 无报错
 - [ ] `python -m app.scripts.seed_admin` 创建 PLATFORM_ADMIN 成功
 - [ ] `uvicorn app.main:app --reload` 启动成功，`curl http://localhost:8000/api/health` 返回 200

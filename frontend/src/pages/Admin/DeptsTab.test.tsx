@@ -14,8 +14,41 @@ interface TestDept {
   path: string | null;
 }
 
+interface TestUser {
+  id: number;
+  name: string;
+  email: string;
+  dept: string | null;
+  dept_id: number | null;
+  roles: string[];
+  status: number;
+  created_at: string;
+}
+
 let DEPTS: TestDept[] = [];
 let DEPT_APPS: Record<number, number[]> = {};
+const USERS: TestUser[] = [
+  {
+    id: 11,
+    name: "王小明",
+    email: "wxm@company.com",
+    dept: "研发部",
+    dept_id: 2,
+    roles: ["USER"],
+    status: 1,
+    created_at: "2026-09-01T00:00:00Z",
+  },
+  {
+    id: 12,
+    name: "李霞",
+    email: "lixia@company.com",
+    dept: "研发部",
+    dept_id: 2,
+    roles: ["USER", "PLATFORM_ADMIN"],
+    status: 1,
+    created_at: "2026-09-01T00:00:00Z",
+  },
+];
 
 const listCalls: string[] = [];
 const createBodies: Array<Record<string, unknown>> = [];
@@ -72,6 +105,14 @@ const server = setupServer(
     DEPTS = DEPTS.filter((d) => d.id !== Number(params.id));
     return new HttpResponse(null, { status: 204 });
   }),
+  mswHttp.get("http://localhost/api/admin/users", ({ request }) => {
+    // 部门成员视图：按 dept_id 过滤（与后端语义一致）
+    const deptId = new URL(request.url).searchParams.get("dept_id");
+    const items = deptId
+      ? USERS.filter((u) => u.dept_id === Number(deptId))
+      : USERS;
+    return HttpResponse.json({ total: items.length, items });
+  }),
   mswHttp.get("http://localhost/api/admin/depts/:id/apps", ({ params }) => {
     return HttpResponse.json({ app_ids: DEPT_APPS[Number(params.id)] ?? [] });
   }),
@@ -110,7 +151,7 @@ describe("部门管理 Tab", () => {
     expect(listCalls).toContain("list");
   });
 
-  it("选中部门后展示操作按钮（无子部门/移动）", async () => {
+  it("选中部门后展示操作按钮（无子部门/移动）与成员列表", async () => {
     render(
       <MemoryRouter>
         <DeptsTab />
@@ -123,6 +164,11 @@ describe("部门管理 Tab", () => {
     expect(screen.getByText("删除")).toBeTruthy();
     expect(screen.queryByText("新建子部门")).toBeNull();
     expect(screen.queryByText("移动")).toBeNull();
+    // 成员列表：研发部两人（含管理员标签）
+    expect(await screen.findByText("成员（2）")).toBeTruthy();
+    expect(screen.getByText("王小明")).toBeTruthy();
+    expect(screen.getByText("李霞")).toBeTruthy();
+    expect(screen.getByText("管理员")).toBeTruthy();
   });
 
   it("创建顶级部门：调 POST /api/admin/depts", async () => {

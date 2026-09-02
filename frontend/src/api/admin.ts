@@ -25,6 +25,7 @@ export interface AdminUsersPage {
 export interface ListUsersParams {
   query?: string;
   status?: 0 | 1;
+  dept_id?: number;
   page?: number;
   page_size?: number;
 }

@@ -5,16 +5,19 @@ import {
   PlusOutlined,
   TeamOutlined,
 } from "@ant-design/icons";
-import { Button, Empty, Form, Input, List, Modal, message } from "antd";
+import { UserOutlined } from "@ant-design/icons";
+import { Button, Empty, Form, Input, List, Modal, Spin, Tag, message } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import {
   createDept,
   deleteDept,
   getDeptApps,
   listDepts,
+  listUsers,
   putDeptApps,
   updateDept,
   type AdminDept,
+  type AdminUser,
 } from "../../api/admin";
 import { extractDetail } from "../../api/http";
 import AuthorizationsDrawer from "./AuthorizationsDrawer";
@@ -64,6 +67,25 @@ export default function DeptsTab() {
   }, []);
 
   const selected = depts.find((d) => d.id === selectedId) ?? null;
+
+  // 部门成员（选中变化时拉取；dept_id 过滤走后端）
+  const [members, setMembers] = useState<AdminUser[]>([]);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const loadMembers = useCallback(async () => {
+    if (!selected) return setMembers([]);
+    setMembersLoading(true);
+    try {
+      const data = await listUsers({ dept_id: selected.id, page_size: 100 });
+      setMembers(data.items);
+    } catch {
+      setMembers([]);
+    } finally {
+      setMembersLoading(false);
+    }
+  }, [selected]);
+  useEffect(() => {
+    void loadMembers();
+  }, [loadMembers]);
 
   async function submitCreate() {
     let values: CreateForm;
@@ -209,6 +231,29 @@ export default function DeptsTab() {
             <div style={{ color: "var(--text-muted)", fontSize: 12.5, marginTop: 8 }}>
               员工归属在「用户」页的行菜单「设置部门」中配置；部门级授权对该部门所有员工生效（与用户/角色授权取并集）。
             </div>
+            <div style={{ fontWeight: 600, fontSize: 13, margin: "16px 0 8px" }}>
+              成员（{members.length}）
+            </div>
+            {membersLoading ? (
+              <Spin size="small" />
+            ) : members.length === 0 ? (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无成员——到「用户」页用「设置部门」把员工挂进来" />
+            ) : (
+              <List
+                size="small"
+                dataSource={members}
+                renderItem={(u) => (
+                  <List.Item style={{ padding: "6px 0" }}>
+                    <UserOutlined style={{ color: "var(--teal)", marginRight: 8 }} />
+                    <span style={{ fontWeight: 600, fontSize: 13 }}>{u.name}</span>
+                    <span style={{ color: "var(--text-muted)", fontSize: 12, marginLeft: 8 }}>{u.email}</span>
+                    <div style={{ flex: 1 }} />
+                    {u.status === 0 && <Tag color="red">已禁用</Tag>}
+                    {u.roles?.includes("PLATFORM_ADMIN") && <Tag color="teal">管理员</Tag>}
+                  </List.Item>
+                )}
+              />
+            )}
           </>
         )}
       </div>

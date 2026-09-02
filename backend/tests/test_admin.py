@@ -195,3 +195,21 @@ async def test_user_out_includes_dept_id(client: AsyncClient):
         f"/api/admin/users/{created.json()['id']}", json={"dept_id": None}
     )
     assert moved.json()["dept_id"] is None
+
+
+async def test_list_users_filters_by_dept(client: AsyncClient):
+    """部门成员视图：dept_id 参数过滤（部门页详情成员列表数据源）。"""
+    await login(client)
+    await client.post("/api/admin/depts", json={"name": "一部"})
+    await client.post("/api/admin/depts", json={"name": "二部"})
+    for i, dept in enumerate([1, 1, 2], start=1):
+        await client.post(
+            "/api/admin/users",
+            json={"name": f"m{i}", "email": f"m{i}@company.com", "password": "pass-123", "dept_id": dept},
+        )
+    resp = await client.get("/api/admin/users", params={"dept_id": 1})
+    body = resp.json()
+    assert body["total"] == 2
+    assert {u["email"] for u in body["items"]} == {"m1@company.com", "m2@company.com"}
+    assert all(u["dept_id"] == 1 for u in body["items"])
+    assert (await client.get("/api/admin/users", params={"dept_id": 2})).json()["total"] == 1

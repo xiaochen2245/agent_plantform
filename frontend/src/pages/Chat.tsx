@@ -3,6 +3,7 @@ import { Button, Empty, Select, Spin } from "antd";
 import { useEffect, useRef } from "react";
 import Composer from "../components/Composer";
 import MessageItem from "../components/MessageItem";
+import ErrorBoundary from "../components/ErrorBoundary";
 import WorkflowComposer from "../components/WorkflowComposer";
 import { useChatStore } from "../stores/chat";
 
@@ -87,9 +88,11 @@ export default function Chat() {
             </div>
           ) : (
             <div className="thread-col">
-              {messages.map((m) => (
-                <MessageItem key={m.id} message={m} onRetry={() => void retryLast()} streaming={streaming} />
-              ))}
+              <ErrorBoundary scope="local">
+                {messages.map((m) => (
+                  <MessageItem key={m.id} message={m} onRetry={() => void retryLast()} streaming={streaming} />
+                ))}
+              </ErrorBoundary>
               <div ref={bottomRef} />
             </div>
           )}

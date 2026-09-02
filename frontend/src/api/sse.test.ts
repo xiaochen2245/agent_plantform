@@ -126,3 +126,20 @@ describe("sendChatStream 错误分类", () => {
     expect(onError).toHaveBeenCalledWith("Internal error", "generic");
   });
 });
+
+describe("usage 归一化（A6）", () => {
+  it("契约形状 total 直接透传", async () => {
+    const { normalizeUsage } = await import("./sse");
+    expect(normalizeUsage({ total: 128 })).toEqual({ total: 128 });
+  });
+
+  it("真机 Dify 的 total_tokens 映射为 total", async () => {
+    const { normalizeUsage } = await import("./sse");
+    expect(normalizeUsage({ total_tokens: 4424 })).toEqual({ total: 4424 });
+  });
+
+  it("缺失时归零（不再渲染 tokens: undefined）", async () => {
+    const { normalizeUsage } = await import("./sse");
+    expect(normalizeUsage(undefined)).toEqual({ total: 0 });
+  });
+});

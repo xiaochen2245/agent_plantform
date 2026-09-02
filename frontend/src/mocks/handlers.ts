@@ -279,6 +279,8 @@ export const handlers = [
           } else if (query.includes("失败")) {
             await delay(300);
             send("error", { message: "回答生成失败，请重试" });
+            // 对齐真机行为：错误后仍发 agent_done（前端 A3 靠它判错误态保留）
+            send("agent_done", {});
             controller.close();
             return;
           }

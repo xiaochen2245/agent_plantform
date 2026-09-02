@@ -230,3 +230,32 @@ async def test_image_mime_maps_to_image_type(client: AsyncClient):
     await _send_with_file(client, up.json()["file_id"])
     chat_calls = [c for c in captured if "chat-messages" in c["url"]]
     assert chat_calls[0]["json"]["files"][0]["type"] == "image"
+
+
+# ── B5：上传 TTL 清理 ──────────────────────────────────────────────────────
+async def test_sweep_expired_uploads_removes_only_stale(tmp_path, monkeypatch):
+    import os
+    import time
+
+    from app.files.cleanup import sweep_expired_uploads
+
+    old = tmp_path / "old.bin"
+    old.write_bytes(b"x")
+    stale_ts = time.time() - 40 * 86400  # 40 天前
+    os.utime(old, (stale_ts, stale_ts))
+    fresh = tmp_path / "fresh.bin"
+    fresh.write_bytes(b"y")
+
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(tmp_path))
+    monkeypatch.setattr(settings, "UPLOAD_TTL_DAYS", 30)
+    await sweep_expired_uploads()
+
+    assert not old.exists()
+    assert fresh.exists()
+
+
+async def test_sweep_missing_dir_is_noop(tmp_path, monkeypatch):
+    from app.files.cleanup import sweep_expired_uploads
+
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(tmp_path / "not-exist"))
+    await sweep_expired_uploads()  # 不抛即通过

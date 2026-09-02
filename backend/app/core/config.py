@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     # 契约 v4：上传本地卷（相对 backend cwd；测试指向 tmp 目录）
     UPLOAD_DIR: str = "uploads"
 
+    # B5：过期附件清理 TTL（天）；启动时后台扫一遍 UPLOAD_DIR
+    UPLOAD_TTL_DAYS: int = 30
+
     # Dify 服务 API 基址（本切片不真调，测试用 FakeDify；真实联调时指向 .226）
     DIFY_BASE_URL: str = "http://192.168.20.226"
 

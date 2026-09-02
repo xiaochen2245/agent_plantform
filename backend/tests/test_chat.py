@@ -10,7 +10,7 @@ from app.main import app
 from app.models.conversation import Conversation
 from app.models.message import Message
 from tests.conftest import login
-from tests.fake_dify import SSE_OK, exploding_dify_client, fake_dify_client, sse_events
+from tests.fake_dify import SSE_OK, exploding_dify_client, fake_dify_client, slow_dify_client, sse_events
 
 
 def _use(dify) -> None:
@@ -163,3 +163,68 @@ async def test_send_midstream_abort_persists_partial_content(client: AsyncClient
     msgs = await _db_messages(conv.id)
     assert [m.role for m in msgs] == ["user", "assistant"]
     assert msgs[1].content == "部分回"
+
+
+# ── B1：客户端断开（starlette cancel_scope.cancel() 语义）仍保证落库 ──────────
+async def test_cancelled_stream_persists_through_cancellation(
+    client: AsyncClient, monkeypatch
+):
+    """复现 starlette 断开机制：流任务被其所属 cancel scope 取消后，
+    未加 shield 的 finally await 会被立即跳过 → 落库必须穿透（审查 P1-3）。
+
+    用带取消检查点的记录器替换真实落库：`await anyio.sleep(0)` 复刻落库的
+    首个 await —— 无 shield 时 CancelledError 在此立即抛出、append 永不执行。
+    真实 DB 提交路径由既有 HTTP 流测试覆盖；本测试只锁定取消语义，
+    避免取消上下文污染 StaticPool 共享连接（aiosqlite terminate 竞态）。
+    """
+    import asyncio
+    import contextlib
+    import uuid
+    from types import SimpleNamespace
+
+    import anyio
+
+    from app.chat import service
+
+    captured: list[dict] = []
+
+    async def recorder(session_factory, conversation_id, accumulated, token_usage,
+                       dify_conversation_id, reasoning=""):
+        await anyio.sleep(0)  # 取消检查点：无 shield 时在此抛 CancelledError
+        captured.append({
+            "conversation_id": conversation_id,
+            "accumulated": accumulated,
+            "reasoning": reasoning,
+        })
+
+    monkeypatch.setattr(service, "_persist_assistant", recorder)
+
+    conv_stub = SimpleNamespace(id=uuid.uuid4(), dify_conversation_id=None)
+    dify = slow_dify_client(SSE_OK, frame_delay=0.05)
+    agen = service.stream_dify_events(
+        dify, SimpleNamespace(id=1), SimpleNamespace(id=1), conv_stub, "cancel me"
+    )
+
+    consumed = [0]
+    holder: dict = {}
+    started = asyncio.Event()
+
+    async def consume_runner() -> None:
+        with anyio.CancelScope() as scope:
+            holder["scope"] = scope
+            started.set()
+            async for _chunk in agen:
+                consumed[0] += 1
+
+    runner = asyncio.create_task(consume_runner())
+    await started.wait()
+    await asyncio.sleep(0.12)  # 消费若干帧后取消（帧间隔 0.05s）
+    holder["scope"].cancel()  # 复刻 starlette：cancel_scope.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await runner
+
+    assert consumed[0] >= 1  # 取消确实发生在流中（未跑完）
+    assert len(captured) == 1  # shield 生效：落库穿透了取消
+    assert captured[0]["conversation_id"] == conv_stub.id
+    assert captured[0]["accumulated"].startswith("你")
+    assert len(captured[0]["accumulated"]) <= 3  # 只落已流出的部分

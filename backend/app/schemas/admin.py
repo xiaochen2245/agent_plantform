@@ -42,3 +42,13 @@ class UserAppsResponse(BaseModel):
 
 class UserAppsUpdate(BaseModel):
     app_ids: list[int]
+
+
+class UserDatasetsResponse(BaseModel):
+    """契约 v8：dataset_id 为 Dify 侧 UUID 字符串（无本地表，不做存在性校验）。"""
+
+    dataset_ids: list[str]
+
+
+class UserDatasetsUpdate(BaseModel):
+    dataset_ids: list[str]

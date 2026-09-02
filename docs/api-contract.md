@@ -138,10 +138,28 @@
 | POST /api/kb/datasets/{id}/documents/text `{"name","text","indexing_technique"}` | PLATFORM_ADMIN | 201 透传 create-by-text 响应 |
 | POST /api/kb/datasets/{id}/documents/file（multipart：`file` + `indexing_technique` 表单域） | PLATFORM_ADMIN | ≤20MB；文档类 MIME 白名单（pdf/docx/pptx/xlsx/txt/md/csv/html/json）；201 透传 |
 | DELETE /api/kb/datasets/{id}/documents/{document_id} | PLATFORM_ADMIN | 204 |
-| POST /api/kb/datasets/{id}/retrieve `{"query"}` | 登录 | 命中测试，透传 `{query:{records:[{score,segment:{content,document:{name}}}]}}` |
+| POST /api/kb/datasets/{id}/retrieve `{"query"}` | 登录 | 命中测试，透传 `{query:{...}, records:[{score,segment:{content,document:{name}}}]}`（records 为顶层字段） |
 
 ## 语义与边界
 - `indexing_technique`（high_quality|economy）必须与目标库一致；由前端从 datasets 列表取值透传
 - App↔知识库的**绑定**只能在 Dify 控制台完成（Service API 无此能力）；门户 /kb = 文档管理 + 检索测试
 - Dataset key 作用域 = 创建该 key 的成员可见的库；知识库需在 Dify 控制台授权全员后才对平台可见
 - 操作审计：后端结构化日志（user/dataset/doc id），不落库
+
+---
+
+# v8 增补（wave9 · orchestrator 批准 · 知识库租户隔离）
+
+## 语义
+- 隔离在**网关层**实现（Dify 侧仍是工作区级 key，所有门户用户共享一个上游身份）
+- `dataset_authorizations` 表：dataset_id（Dify UUID，无本地外键）× principal（user/dept/role 三态，同 app_authorizations）
+- 可见 = 用户直授 ∪ 所属部门 ∪ 拥有角色；PLATFORM_ADMIN 不受限（恒全量）
+- **默认关闭**：无任何授权记录的知识库对非管理员不可见；列表过滤 + 作用域端点（documents/上传/删除/retrieve）一律 403 `{"detail":"Not authorized for this dataset"}`
+
+## 端点变更
+- GET /api/kb/datasets：非管理员仅返回授权集合内的库（data 过滤、total 重算；分页取上游页后过滤，内部规模下语义等价）
+- 其余 /api/kb/datasets/{id}/* 端点：入口统一过 `_require_dataset_access` 门
+
+## Admin 新增（仅 PLATFORM_ADMIN）
+- GET /api/admin/users/{id}/datasets → `{"dataset_ids":["<dify-uuid>"]}`
+- PUT /api/admin/users/{id}/datasets `{"dataset_ids":[...]}` → 200（用户级全量替换；dataset_id 不做本地存在性校验——Dify 是真相源，前端仅从实际目录勾选）

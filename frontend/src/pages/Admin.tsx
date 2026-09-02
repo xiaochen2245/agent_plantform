@@ -5,12 +5,15 @@ import { useCallback, useEffect, useState } from "react";
 import {
   createUser,
   getUserApps,
+  getUserDatasets,
   listUsers,
   patchUser,
   putUserApps,
+  putUserDatasets,
   resetPassword,
   type AdminUser,
 } from "../api/admin";
+import { listDatasets } from "../api/kb";
 import { extractDetail } from "../api/http";
 import { useChatStore } from "../stores/chat";
 
@@ -45,6 +48,8 @@ export default function Admin() {
 
   const [drawerUser, setDrawerUser] = useState<AdminUser | null>(null);
   const [drawerApps, setDrawerApps] = useState<number[]>([]);
+  const [drawerDatasets, setDrawerDatasets] = useState<string[]>([]);
+  const [datasetCatalog, setDatasetCatalog] = useState<{ id: string; name: string }[]>([]);
   const [drawerLoading, setDrawerLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -108,10 +113,17 @@ export default function Admin() {
   async function openDrawer(user: AdminUser) {
     setDrawerUser(user);
     setDrawerApps([]);
+    setDrawerDatasets([]);
     setDrawerLoading(true);
     try {
-      const { app_ids } = await getUserApps(user.id);
+      const [{ app_ids }, { dataset_ids }, kbPage] = await Promise.all([
+        getUserApps(user.id),
+        getUserDatasets(user.id),
+        listDatasets(), // 管理员视角全量目录（名称来自 Dify）
+      ]);
       setDrawerApps(app_ids);
+      setDrawerDatasets(dataset_ids);
+      setDatasetCatalog(kbPage.data?.map((d) => ({ id: d.id, name: d.name })) ?? []);
     } catch {
       message.error("该用户授权信息加载失败");
       setDrawerUser(null);
@@ -124,8 +136,11 @@ export default function Admin() {
     if (!drawerUser) return;
     setSaving(true);
     try {
-      await putUserApps(drawerUser.id, drawerApps);
-      message.success(`已保存 ${drawerUser.name} 的 Agent 授权`);
+      await Promise.all([
+        putUserApps(drawerUser.id, drawerApps),
+        putUserDatasets(drawerUser.id, drawerDatasets),
+      ]);
+      message.success(`已保存 ${drawerUser.name} 的授权`);
       setDrawerUser(null);
     } catch (e) {
       message.error(extractDetail(e, "授权保存失败"));
@@ -308,17 +323,33 @@ export default function Admin() {
         }
       >
         <p style={{ color: "var(--text-muted)", fontSize: 12.5, marginTop: 0 }}>
-          勾选该员工可直接使用的 Agent（用户级授权；部门/角色级授权后续开放）
+          勾选该员工可直接使用的 Agent 与知识库（用户级授权；部门/角色级授权后续开放）
         </p>
         {drawerLoading ? (
           <span style={{ color: "var(--text-muted)", fontSize: 12.5 }}>加载当前授权…</span>
         ) : (
-          <Checkbox.Group
-            style={{ display: "flex", flexDirection: "column", gap: 14 }}
-            value={drawerApps}
-            onChange={(vals) => setDrawerApps(vals as number[])}
-            options={apps.map((a) => ({ label: `${a.name} — ${a.description}`, value: a.id }))}
-          />
+          <>
+            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 10 }}>Agent 授权</div>
+            <Checkbox.Group
+              style={{ display: "flex", flexDirection: "column", gap: 14 }}
+              value={drawerApps}
+              onChange={(vals) => setDrawerApps(vals as number[])}
+              options={apps.map((a) => ({ label: `${a.name} — ${a.description}`, value: a.id }))}
+            />
+            <div style={{ fontWeight: 600, fontSize: 13, margin: "20px 0 10px" }}>知识库授权（租户隔离）</div>
+            {datasetCatalog.length === 0 ? (
+              <span style={{ color: "var(--text-muted)", fontSize: 12.5 }}>
+                暂无可授权的知识库（先在 Dify 控制台创建并共享给全员）
+              </span>
+            ) : (
+              <Checkbox.Group
+                style={{ display: "flex", flexDirection: "column", gap: 14 }}
+                value={drawerDatasets}
+                onChange={(vals) => setDrawerDatasets(vals as string[])}
+                options={datasetCatalog.map((d) => ({ label: d.name, value: d.id }))}
+              />
+            )}
+          </>
         )}
       </Drawer>
 

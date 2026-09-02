@@ -456,18 +456,16 @@ export const handlers = [
     const body = (await request.json()) as { query?: string };
     const q = body.query ?? "";
     return HttpResponse.json({
-      query: {
-        content: q,
-        records: [
-          {
-            score: 0.912,
-            segment: {
-              content: `「${q}」相关：差旅报销需在出差结束后 7 天内提交。`,
-              document: { id: "doc-1", name: "报销政策.pdf" },
-            },
+      query: { content: q },
+      records: [
+        {
+          score: 0.912,
+          segment: {
+            content: `「${q}」相关：差旅报销需在出差结束后 7 天内提交。`,
+            document: { id: "doc-1", name: "报销政策.pdf" },
           },
-        ],
-      },
+        },
+      ],
     });
   }),
 ];

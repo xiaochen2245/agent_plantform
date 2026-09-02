@@ -74,8 +74,13 @@ async def test_list_datasets_passthrough_with_dataset_key(client: AsyncClient):
 
 
 async def test_read_allowed_for_normal_user_write_forbidden(client: AsyncClient):
+    """v8 后读也需授权：先授予 ds-1，读放行；写仍恒拒。"""
     _install(fake_dataset_client())
-    await mkuser("guest1@company.com")
+    uid = await mkuser("guest1@company.com")
+    await login(client)  # admin 授权
+    resp = await client.put(f"/api/admin/users/{uid}/datasets", json={"dataset_ids": ["ds-1"]})
+    assert resp.status_code == 200
+
     await login(client, "guest1@company.com", "guest-pass-123")
 
     # 读：列表 + 命中测试 → 200
@@ -177,3 +182,77 @@ async def test_missing_dataset_key_503(client: AsyncClient, monkeypatch):
     resp = await client.get("/api/kb/datasets")
     assert resp.status_code == 503
     assert resp.json()["detail"] == "knowledge base service not configured"
+
+
+# ── 契约 v8：知识库租户隔离（网关映射）────────────────────────────────
+
+
+async def _mk_normal_user(client: AsyncClient, email: str) -> None:
+    await login(client)  # admin 建号
+    resp = await client.post(
+        "/api/admin/users",
+        json={"name": email.split("@")[0], "email": email, "password": "pass-12345"},
+    )
+    assert resp.status_code == 201
+    await login(client, email, "pass-12345")
+
+
+async def test_tenant_isolation_filters_list_and_blocks_scoped(
+    client: AsyncClient,
+):
+    """无授权：列表过滤为空 + 作用域端点 403；授权后放行；admin 恒全量。"""
+    _install(fake_dataset_client())
+    await login(client)  # admin：恒全量
+    body = await client.get("/api/kb/datasets")
+    assert [d["name"] for d in body.json()["data"]] == ["General Mode-ECO 1"]
+
+    # 未授权普通用户：列表被过滤为空，documents/retrieve 403
+    await _mk_normal_user(client, "t1@company.com")
+    body = await client.get("/api/kb/datasets")
+    assert body.json()["data"] == []
+    assert body.json()["total"] == 0
+    assert (
+        await client.get("/api/kb/datasets/ds-1/documents")
+    ).status_code == 403
+    assert (
+        await client.post("/api/kb/datasets/ds-1/retrieve", json={"query": "q"})
+    ).status_code == 403
+
+    # admin 授权 ds-1 → 用户立即可见可用
+    await login(client)
+    resp = await client.put("/api/admin/users/2/datasets", json={"dataset_ids": ["ds-1"]})
+    assert resp.status_code == 200 and resp.json()["dataset_ids"] == ["ds-1"]
+    await login(client, "t1@company.com", "pass-12345")  # 已建号，直接重登
+    body = await client.get("/api/kb/datasets")
+    assert [d["name"] for d in body.json()["data"]] == ["General Mode-ECO 1"]
+    assert (
+        await client.post("/api/kb/datasets/ds-1/retrieve", json={"query": "q"})
+    ).status_code == 200
+    # 授权了 ds-1，其他库仍 403
+    assert (
+        await client.get("/api/kb/datasets/other-ds/documents")
+    ).status_code == 403
+
+
+async def test_admin_dataset_grants_crud(client: AsyncClient):
+    """GET/PUT 用户级知识库授权：全量替换语义（空数组=清空）。"""
+    _install(fake_dataset_client())
+    await login(client)
+    await client.post(
+        "/api/admin/users",
+        json={"name": "t2", "email": "t2@company.com", "password": "pass-12345"},
+    )
+    resp = await client.put(
+        "/api/admin/users/2/datasets", json={"dataset_ids": ["ds-a", "ds-b"]}
+    )
+    assert resp.json()["dataset_ids"] == ["ds-a", "ds-b"]
+    assert (await client.get("/api/admin/users/2/datasets")).json()[
+        "dataset_ids"
+    ] == ["ds-a", "ds-b"]
+    # 全量替换：清空
+    resp = await client.put("/api/admin/users/2/datasets", json={"dataset_ids": []})
+    assert resp.json()["dataset_ids"] == []
+    # 不存在的用户 404
+    assert (
+        await client.get("/api/admin/users/999/datasets")
+    ).status_code == 404

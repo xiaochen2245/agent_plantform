@@ -84,9 +84,10 @@ export async function retrieveChunks(
   datasetId: string,
   query: string
 ): Promise<RetrieveRecord[]> {
-  const resp = await http.post<{ query?: { records?: RetrieveRecord[] } }>(
+  // Dify 真实形状：records 为顶层字段（query 只携带查询回显）
+  const resp = await http.post<{ query?: unknown; records?: RetrieveRecord[] }>(
     `/kb/datasets/${datasetId}/retrieve`,
     { query }
   );
-  return resp.data.query?.records ?? [];
+  return resp.data.records ?? [];
 }

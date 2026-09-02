@@ -9,8 +9,12 @@ import logging
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.auth.deps import current_user, require_platform_admin
+from app.authz import is_dataset_authorized, resolve_visible_dataset_ids
 from app.chat.service import _summarize_upstream_error
+from app.db.session import get_db
 from app.dify.client import DifyClient, DifyDatasetError, dataset_api_key
 from app.dify.deps import get_dify
 from app.files.router import MAX_UPLOAD_BYTES, sanitize_filename
@@ -42,6 +46,14 @@ def _require_dataset_key() -> None:
         )
 
 
+async def _require_dataset_access(
+    db: AsyncSession, user: User, dataset_id: str
+) -> None:
+    """租户隔离门（契约 v8）：未授权库 → 403（与 chat/send 的 app 门同文案风格）。"""
+    if not await is_dataset_authorized(db, user, dataset_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not authorized for this dataset")
+
+
 async def _call(coro) -> dict:
     """统一执行 dataset 调用：上游 4xx 原码透传（message 精简），5xx/网络 → 502。"""
     try:
@@ -57,11 +69,18 @@ async def _call(coro) -> dict:
 async def list_datasets(
     page: int = 1,
     page_size: int = 20,
-    _user: User = Depends(current_user),
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
     dify: DifyClient = Depends(get_dify),
 ) -> dict:
     _require_dataset_key()
-    return await _call(dify.list_datasets(page=page, limit=page_size))
+    result = await _call(dify.list_datasets(page=page, limit=page_size))
+    # 租户过滤（契约 v8）：admin 全量；否则仅返回授权集合内的库（total 重算）
+    visible = await resolve_visible_dataset_ids(db, user)
+    if visible is not None:
+        data = [d for d in result.get("data", []) if str(d.get("id", "")) in visible]
+        result = {**result, "data": data, "total": len(data)}
+    return result
 
 
 @router.get("/datasets/{dataset_id}/documents")
@@ -70,10 +89,12 @@ async def list_documents(
     page: int = 1,
     page_size: int = 20,
     keyword: str = "",
-    _user: User = Depends(current_user),
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
     dify: DifyClient = Depends(get_dify),
 ) -> dict:
     _require_dataset_key()
+    await _require_dataset_access(db, user, dataset_id)
     return await _call(
         dify.list_documents(dataset_id, page=page, limit=page_size, keyword=keyword or None)
     )
@@ -84,9 +105,11 @@ async def create_document_by_text(
     dataset_id: str,
     body: TextDocCreate,
     user: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
     dify: DifyClient = Depends(get_dify),
 ) -> dict:
     _require_dataset_key()
+    await _require_dataset_access(db, user, dataset_id)
     _logger.info("kb text doc create: user=%s dataset=%s name=%s", user.id, dataset_id, body.name)
     return await _call(
         dify.create_doc_by_text(
@@ -105,9 +128,11 @@ async def create_document_by_file(
     file: UploadFile = File(...),
     indexing_technique: str = Form("high_quality"),
     user: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
     dify: DifyClient = Depends(get_dify),
 ) -> dict:
     _require_dataset_key()
+    await _require_dataset_access(db, user, dataset_id)
     declared = request.headers.get("content-length")
     if declared and declared.isdigit() and int(declared) > MAX_UPLOAD_BYTES + 1024 * 1024:
         raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "file too large")
@@ -145,9 +170,11 @@ async def delete_document(
     dataset_id: str,
     document_id: str,
     user: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
     dify: DifyClient = Depends(get_dify),
 ) -> None:
     _require_dataset_key()
+    await _require_dataset_access(db, user, dataset_id)
     _logger.info("kb doc delete: user=%s dataset=%s doc=%s", user.id, dataset_id, document_id)
     await _call(dify.delete_document(dataset_id, document_id))
 
@@ -156,8 +183,10 @@ async def delete_document(
 async def retrieve(
     dataset_id: str,
     body: RetrieveQuery,
-    _user: User = Depends(current_user),
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
     dify: DifyClient = Depends(get_dify),
 ) -> dict:
     _require_dataset_key()
+    await _require_dataset_access(db, user, dataset_id)
     return await _call(dify.retrieve(dataset_id, query=body.query))

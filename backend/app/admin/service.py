@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password
 from app.models.app_authorization import AppAuthorization
+from app.models.dataset_authorization import DatasetAuthorization
 from app.models.department import Department
 from app.models.message import Message  # noqa: F401
 from app.models.refresh_token import RefreshToken
@@ -218,3 +219,42 @@ async def set_user_apps(
         )
     await session.flush()
     return sorted(set(app_ids))
+
+
+async def get_user_datasets(session: AsyncSession, user_id: int) -> list[str] | None:
+    """用户级知识库授权（契约 v8）；用户不存在 None。"""
+    if await session.get(User, user_id) is None:
+        return None
+    rows = await session.execute(
+        select(DatasetAuthorization.dataset_id).where(
+            DatasetAuthorization.principal_type == "user",
+            DatasetAuthorization.principal_id == user_id,
+        )
+    )
+    return sorted({r[0] for r in rows})
+
+
+async def set_user_datasets(
+    session: AsyncSession, user_id: int, dataset_ids: list[str]
+) -> list[str] | None:
+    """用户级知识库授权全量替换（契约 v8）。
+
+    dataset_id 为 Dify 侧 UUID，网关不校验存在性（Dify 是真相源；前端仅从
+    实际列表勾选，非法 id 只会变成永不匹配的授权行，无害）。
+    """
+    if await session.get(User, user_id) is None:
+        return None
+    await session.execute(
+        delete(DatasetAuthorization).where(
+            DatasetAuthorization.principal_type == "user",
+            DatasetAuthorization.principal_id == user_id,
+        )
+    )
+    for dataset_id in sorted(set(dataset_ids)):
+        session.add(
+            DatasetAuthorization(
+                dataset_id=dataset_id, principal_type="user", principal_id=user_id
+            )
+        )
+    await session.flush()
+    return sorted(set(dataset_ids))

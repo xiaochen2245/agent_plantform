@@ -163,3 +163,29 @@
 ## Admin 新增（仅 PLATFORM_ADMIN）
 - GET /api/admin/users/{id}/datasets → `{"dataset_ids":["<dify-uuid>"]}`
 - PUT /api/admin/users/{id}/datasets `{"dataset_ids":[...]}` → 200（用户级全量替换；dataset_id 不做本地存在性校验——Dify 是真相源，前端仅从实际目录勾选）
+
+---
+
+# v9 增补（wave10 · orchestrator 批准 · 库级管理与审计）
+
+## 端点（kb 前缀，除注明外均 PLATFORM_ADMIN）
+| 端点 | 说明 |
+|---|---|
+| POST /api/kb/datasets `{"name","indexing_technique"?}` | 建空知识库 → 201 透传 Dify dataset |
+| DELETE /api/kb/datasets/{id} | 删库 → 204；本地授权行同步清理 |
+| GET /api/kb/datasets/{id}/grants | 该库三态授权全量 → `{"items":[{principal_type,principal_id,name}]}`（name 为主体名称，已删主体为 null） |
+| POST /api/kb/datasets/{id}/grants `{"principal_type","principal_id"}` | 单条授权（幂等 upsert）；主体不存在 → 404 |
+| DELETE /api/kb/datasets/{id}/grants/{principal_type}/{principal_id} | 移除单条授权（幂等）→ 204 |
+| GET /api/kb/audit?page=&page_size= | 审计流水（新在前）→ `{"total","items":[{id,user,action,dataset_id,detail,created_at}]}` |
+
+## 目录端点（授权选择器数据源）
+- GET /api/admin/depts → `{"items":[{id,name}]}`
+- GET /api/admin/roles → `{"items":[{id,code,name}]}`
+
+## 审计语义
+- 表 kb_audit_logs：user_id（无外键，用户删除后仍可追溯）/ action / dataset_id / detail(JSON) / created_at
+- 记录动作：dataset_create / dataset_delete / doc_create_text / doc_create_file / doc_delete / grant_add / grant_remove
+- 与主操作同事务提交；用户级全量替换端点（PUT /admin/users/{id}/datasets）不逐条审计
+
+## 前端观感
+- 思考过程面板与正文统一走打字机平滑（useTypewriter）

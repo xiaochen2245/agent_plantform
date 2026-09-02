@@ -44,6 +44,7 @@ function AttachmentList({ files }: { files: UploadedFile[] }) {
 /** 思考过程面板（契约 v6）：无思考不渲染。
  * 展开策略：生成中且尚无正文时默认展开；正文出现/流结束自动收起；用户手动优先。 */
 function ReasoningPanel({ text, streaming, answerEmpty }: { text: string; streaming: boolean; answerEmpty: boolean }) {
+  const shown = useTypewriter(text, streaming); // 同正文：成簇增量打字机平滑（契约 v9 观感统一）
   const [open, setOpen] = useState(streaming && answerEmpty);
   const [userToggled, setUserToggled] = useState(false);
   useEffect(() => {
@@ -64,7 +65,7 @@ function ReasoningPanel({ text, streaming, answerEmpty }: { text: string; stream
         <span>思考过程</span>
         <DownOutlined className="chevron" />
       </button>
-      {open && <pre className="panel-body">{text}</pre>}
+      {open && <pre className="panel-body">{shown}</pre>}
     </div>
   );
 }

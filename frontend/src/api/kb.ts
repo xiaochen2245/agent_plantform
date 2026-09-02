@@ -80,6 +80,65 @@ export async function deleteDocument(datasetId: string, documentId: string): Pro
   await http.delete(`/kb/datasets/${datasetId}/documents/${documentId}`);
 }
 
+// ---- 契约 v9：库级管理（建/删/授权/审计）----
+
+export async function createDataset(payload: {
+  name: string;
+  indexing_technique: "high_quality" | "economy";
+}): Promise<KbDataset> {
+  return (await http.post<KbDataset>("/kb/datasets", payload)).data;
+}
+
+export async function deleteDataset(datasetId: string): Promise<void> {
+  await http.delete(`/kb/datasets/${datasetId}`);
+}
+
+export interface KbGrant {
+  principal_type: "user" | "dept" | "role";
+  principal_id: number;
+  name: string | null;
+}
+
+export async function listDatasetGrants(datasetId: string): Promise<KbGrant[]> {
+  const resp = await http.get<{ items: KbGrant[] }>(`/kb/datasets/${datasetId}/grants`);
+  return resp.data.items ?? [];
+}
+
+export async function addDatasetGrant(
+  datasetId: string,
+  principalType: KbGrant["principal_type"],
+  principalId: number
+): Promise<void> {
+  await http.post(`/kb/datasets/${datasetId}/grants`, {
+    principal_type: principalType,
+    principal_id: principalId,
+  });
+}
+
+export async function removeDatasetGrant(
+  datasetId: string,
+  principalType: KbGrant["principal_type"],
+  principalId: number
+): Promise<void> {
+  await http.delete(`/kb/datasets/${datasetId}/grants/${principalType}/${principalId}`);
+}
+
+export interface KbAuditItem {
+  id: number;
+  user: string | null;
+  action: string;
+  dataset_id: string | null;
+  detail: string | null;
+  created_at: string | null;
+}
+
+export async function listKbAudit(
+  page = 1,
+  page_size = 20
+): Promise<{ total: number; items: KbAuditItem[] }> {
+  return (await http.get<{ total: number; items: KbAuditItem[] }>("/kb/audit", { params: { page, page_size } })).data;
+}
+
 export async function retrieveChunks(
   datasetId: string,
   query: string

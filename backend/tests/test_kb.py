@@ -256,3 +256,99 @@ async def test_admin_dataset_grants_crud(client: AsyncClient):
     assert (
         await client.get("/api/admin/users/999/datasets")
     ).status_code == 404
+
+
+# ── 契约 v9：建库/删库 + 库级授权管理 + 审计落库 ───────────────────────
+
+
+async def test_create_and_delete_dataset_with_grant_cleanup(client: AsyncClient):
+    captured: list = []
+    _install(fake_dataset_client(captured))
+    await login(client)
+
+    resp = await client.post(
+        "/api/kb/datasets", json={"name": "新建测试库", "indexing_technique": "economy"}
+    )
+    assert resp.status_code == 201
+    assert captured[0]["json"] == {"name": "新建测试库", "indexing_technique": "economy"}
+
+    # 授权一条 → 删库 → 授权行与审计同步
+    await client.put("/api/admin/users/1/datasets", json={"dataset_ids": ["ds-1"]})
+    resp = await client.delete("/api/kb/datasets/ds-1")
+    assert resp.status_code == 204
+    assert (await client.get("/api/admin/users/1/datasets")).json()["dataset_ids"] == []
+
+    # 审计：建库 + 删库 + 用户级授权替换(grant via PUT 不审计，端点级 add/remove 才审计)
+    audit = (await client.get("/api/kb/audit")).json()
+    actions = [i["action"] for i in audit["items"]]
+    assert "dataset_create" in actions and "dataset_delete" in actions
+    assert audit["items"][0]["user"]  # 操作人姓名已 join
+
+
+async def test_dataset_grants_crud_three_principals(client: AsyncClient):
+    """库级授权视图 + 三态单条增删（幂等）+ 主体不存在 404。"""
+    from sqlalchemy import select
+
+    from app.db.session import SessionLocal
+    from app.models.role import Role
+
+    _install(fake_dataset_client())
+    await login(client)
+
+    # 准备：部门/角色/普通用户（直插，复用 authz 测试基建；种子库无部门行）
+    from app.models.department import Department
+
+    async with SessionLocal() as s:
+        s.add(Department(name="审计测试部"))
+        s.add(Role(code="GUEST2", name="访客2"))
+        await s.flush()
+        did = (await s.execute(select(Department.id).order_by(Department.id))).scalars().first()
+        rid = (await s.execute(select(Role.id).where(Role.code == "GUEST2"))).scalar_one()
+        await s.commit()
+    uid = await mkuser("g9@company.com")
+
+    base = "/api/kb/datasets/ds-1/grants"
+    assert (await client.post(base, json={"principal_type": "dept", "principal_id": did})).status_code == 201
+    assert (await client.post(base, json={"principal_type": "role", "principal_id": rid})).status_code == 201
+    assert (await client.post(base, json={"principal_type": "user", "principal_id": uid})).status_code == 201
+    # 幂等：重复添加 201，不报错
+    assert (await client.post(base, json={"principal_type": "user", "principal_id": uid})).status_code == 201
+    # 主体不存在 → 404
+    assert (
+        await client.post(base, json={"principal_type": "user", "principal_id": 99999})
+    ).status_code == 404
+
+    items = (await client.get(base)).json()["items"]
+    kinds = {(i["principal_type"], i["principal_id"]) for i in items}
+    assert {("user", uid), ("dept", did), ("role", rid)} <= kinds
+    assert all(i["name"] for i in items)  # 名称已解析
+
+    # 移除 → 列表少了；幂等移除仍 204
+    assert (
+        await client.delete(f"{base}/user/{uid}")
+    ).status_code == 204
+    items = (await client.get(base)).json()["items"]
+    assert ("user", uid) not in {(i["principal_type"], i["principal_id"]) for i in items}
+    assert (await client.delete(f"{base}/user/{uid}")).status_code == 204
+
+    # 非 admin 碰授权管理 → 403
+    await login(client, "g9@company.com", "guest-pass-123")
+    assert (await client.get(base)).status_code == 403
+
+
+async def test_doc_writes_audited(client: AsyncClient):
+    """契约 v9：文档写路径（文本/文件/删除）全部落审计。"""
+    _install(fake_dataset_client())
+    await login(client)
+    await client.post(
+        "/api/kb/datasets/ds-1/documents/text",
+        json={"name": "审计验证", "text": "内容", "indexing_technique": "economy"},
+    )
+    await client.post(
+        "/api/kb/datasets/ds-1/documents/file",
+        files={"file": ("a.txt", b"hello", "text/plain")},
+        data={"indexing_technique": "economy"},
+    )
+    await client.delete("/api/kb/datasets/ds-1/documents/doc-1")
+    actions = [i["action"] for i in (await client.get("/api/kb/audit")).json()["items"]]
+    assert {"doc_create_text", "doc_create_file", "doc_delete"} <= set(actions)

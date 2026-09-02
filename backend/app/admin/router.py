@@ -1,10 +1,13 @@
 """Admin 路由：用户管理 + 用户级 App 授权（仅 PLATFORM_ADMIN，契约 v2 §Admin）。"""
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin import service
 from app.auth.deps import require_platform_admin
 from app.db.session import get_db
+from app.models.department import Department
+from app.models.role import Role
 from app.models.user import User
 from app.schemas.admin import (
     AdminUserCreate,
@@ -18,6 +21,26 @@ from app.schemas.admin import (
 )
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+
+@router.get("/depts")
+async def list_depts(
+    _admin: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """契约 v9：部门目录（知识库授权选择器数据源；全量不分页，内部规模）。"""
+    rows = (await db.execute(select(Department).order_by(Department.id))).scalars().all()
+    return {"items": [{"id": d.id, "name": d.name} for d in rows]}
+
+
+@router.get("/roles")
+async def list_roles(
+    _admin: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """契约 v9：角色目录（同上）。"""
+    rows = (await db.execute(select(Role).order_by(Role.id))).scalars().all()
+    return {"items": [{"id": r.id, "code": r.code, "name": r.name} for r in rows]}
 
 
 @router.get("/users", response_model=AdminUsersResponse)

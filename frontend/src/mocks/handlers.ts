@@ -468,4 +468,59 @@ export const handlers = [
       ],
     });
   }),
+
+  /* 契约 v9：库级管理（建/删/授权/审计）与目录 */
+
+  mswHttp.post("/api/kb/datasets", async ({ request }) => {
+    const body = (await request.json()) as { name?: string; indexing_technique?: string };
+    return HttpResponse.json(
+      {
+        id: "ds-new-1",
+        name: body.name ?? "",
+        document_count: 0,
+        word_count: 0,
+        indexing_technique: body.indexing_technique ?? "high_quality",
+        created_at: 1788300000,
+      },
+      { status: 201 }
+    );
+  }),
+
+  mswHttp.delete("/api/kb/datasets/:id", () => new HttpResponse(null, { status: 204 })),
+
+  mswHttp.get("/api/kb/datasets/:id/grants", () =>
+    HttpResponse.json({
+      items: [{ principal_type: "role", principal_id: 2, name: "员工" }],
+    })
+  ),
+
+  mswHttp.post("/api/kb/datasets/:id/grants", () => HttpResponse.json({}, { status: 201 })),
+
+  mswHttp.delete("/api/kb/datasets/:id/grants/:t/:pid", () =>
+    new HttpResponse(null, { status: 204 })
+  ),
+
+  mswHttp.get("/api/kb/audit", () =>
+    HttpResponse.json({
+      total: 1,
+      items: [
+        {
+          id: 1,
+          user: "张明",
+          action: "dataset_create",
+          dataset_id: "ds-eco-1",
+          detail: "{\"name\": \"General Mode-ECO 1\"}",
+          created_at: "2026-09-02T09:00:00Z",
+        },
+      ],
+    })
+  ),
+
+  mswHttp.get("/api/admin/depts", () =>
+    HttpResponse.json({ items: [{ id: 1, name: "信息技术部" }] })
+  ),
+
+  mswHttp.get("/api/admin/roles", () =>
+    HttpResponse.json({ items: [{ id: 2, code: "USER", name: "员工" }] })
+  ),
 ];

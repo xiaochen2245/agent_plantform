@@ -202,6 +202,21 @@ class DifyClient:
         )
         self._check_dataset_resp(resp)
 
+    async def create_dataset(self, name: str, indexing_technique: str = "high_quality") -> dict:
+        """建空知识库（契约 v9）；返回的 dataset 含 id/indexing_technique。"""
+        resp = await self._client.post(
+            "/v1/datasets",
+            json={"name": name, "indexing_technique": indexing_technique},
+            headers=self._dataset_headers(),
+        )
+        return self._check_dataset_resp(resp)
+
+    async def delete_dataset(self, dataset_id: str) -> None:
+        resp = await self._client.delete(
+            f"/v1/datasets/{dataset_id}", headers=self._dataset_headers()
+        )
+        self._check_dataset_resp(resp)
+
     async def retrieve(self, dataset_id: str, query: str) -> dict:
         resp = await self._client.post(
             f"/v1/datasets/{dataset_id}/retrieve",

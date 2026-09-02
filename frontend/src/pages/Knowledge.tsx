@@ -3,15 +3,18 @@ import {
   FileAddOutlined,
   ReloadOutlined,
   SearchOutlined,
+  TeamOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
 import {
   Button,
+  Drawer,
   Empty,
   Form,
   Input,
   Modal,
   Popconfirm,
+  Select,
   Table,
   Tag,
   Upload,
@@ -20,18 +23,27 @@ import {
 import type { UploadRequestOption } from "rc-upload/lib/interface";
 import { useCallback, useEffect, useState } from "react";
 import {
+  addDatasetGrant,
+  createDataset,
   createDocByFile,
   createDocByText,
+  deleteDataset,
   deleteDocument,
+  listDatasetGrants,
   listDatasets,
   listDocuments,
+  listKbAudit,
+  removeDatasetGrant,
   retrieveChunks,
   type DifyPage,
+  type KbAuditItem,
   type KbDataset,
   type KbDocument,
+  type KbGrant,
   type RetrieveRecord,
 } from "../api/kb";
 import { extractDetail } from "../api/http";
+import { listDepts, listRoles, listUsers } from "../api/admin";
 import { useAuthStore } from "../stores/auth";
 
 /** 索引状态 → 中文文案与颜色；未终态（非 completed/error/paused）触发 5s 轮询。 */
@@ -68,6 +80,18 @@ interface TextForm {
   text: string;
 }
 
+interface DatasetForm {
+  name: string;
+  indexing_technique: "high_quality" | "economy";
+}
+
+type PrincipalType = KbGrant["principal_type"];
+const PRINCIPAL_LABEL: Record<PrincipalType, string> = {
+  user: "用户",
+  dept: "部门",
+  role: "角色",
+};
+
 /** 知识库工作台（契约 v7）：文档管理 + 检索测试。
  * 权限：读全员；上传/删除仅 PLATFORM_ADMIN（后端 403 兜底，此处隐藏入口）。
  * 边界：App↔知识库绑定在 Dify 控制台完成，Service API 无此能力。 */
@@ -83,6 +107,21 @@ export default function Knowledge() {
   const [textOpen, setTextOpen] = useState(false);
   const [textForm] = Form.useForm<TextForm>();
   const [creating, setCreating] = useState(false);
+
+  const [createDsOpen, setCreateDsOpen] = useState(false);
+  const [createDsForm] = Form.useForm<DatasetForm>();
+  const [creatingDs, setCreatingDs] = useState(false);
+
+  const [grantsOpen, setGrantsOpen] = useState(false);
+  const [grants, setGrants] = useState<KbGrant[]>([]);
+  const [grantsLoading, setGrantsLoading] = useState(false);
+  const [grantType, setGrantType] = useState<PrincipalType>("dept");
+  const [grantTarget, setGrantTarget] = useState<number | null>(null);
+  const [grantOptions, setGrantOptions] = useState<{ label: string; value: number }[]>([]);
+  const [grantAdding, setGrantAdding] = useState(false);
+
+  const [audit, setAudit] = useState<{ total: number; items: KbAuditItem[] }>({ total: 0, items: [] });
+  const [auditLoading, setAuditLoading] = useState(false);
 
   const [hitQuery, setHitQuery] = useState("");
   const [hitLoading, setHitLoading] = useState(false);
@@ -136,6 +175,120 @@ export default function Knowledge() {
   const afterWrite = () => {
     void loadDocs();
     void loadDatasets(); // document_count 同步刷新
+    if (isAdmin) void loadAudit(); // 契约 v9：写操作后刷新审计区
+  };
+
+  const loadAudit = useCallback(async () => {
+    setAuditLoading(true);
+    try {
+      setAudit(await listKbAudit());
+    } catch {
+      /* 审计区静默失败：不阻断主页面 */
+    } finally {
+      setAuditLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isAdmin) void loadAudit();
+  }, [isAdmin, loadAudit]);
+
+  const submitCreateDataset = async () => {
+    const values = await createDsForm.validateFields();
+    setCreatingDs(true);
+    try {
+      const created = await createDataset(values);
+      message.success(`已创建「${created.name}」`);
+      setCreateDsOpen(false);
+      createDsForm.resetFields();
+      await loadDatasets();
+      setSelected(created);
+    } catch (e) {
+      message.error(extractDetail(e, "创建失败"));
+    } finally {
+      setCreatingDs(false);
+    }
+  };
+
+  const confirmDeleteDataset = async (ds: KbDataset) => {
+    try {
+      await deleteDataset(ds.id);
+      message.success(`已删除「${ds.name}」`);
+      if (selected?.id === ds.id) setSelected(null);
+      await loadDatasets();
+      if (isAdmin) void loadAudit();
+    } catch (e) {
+      message.error(extractDetail(e, "删除失败"));
+    }
+  };
+
+  const loadGrants = useCallback(async () => {
+    if (!selected) return;
+    setGrantsLoading(true);
+    try {
+      setGrants(await listDatasetGrants(selected.id));
+    } catch (e) {
+      message.error(extractDetail(e, "授权信息加载失败"));
+    } finally {
+      setGrantsLoading(false);
+    }
+  }, [selected]);
+
+  useEffect(() => {
+    if (grantsOpen) {
+      setGrantTarget(null);
+      void loadGrants();
+    }
+  }, [grantsOpen, loadGrants]);
+
+  // 切换主体类型时拉取对应目录（用户走搜索接口取首页，内部规模够用）
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        let opts: { label: string; value: number }[] = [];
+        if (grantType === "dept") {
+          opts = (await listDepts()).map((d) => ({ label: d.name, value: d.id }));
+        } else if (grantType === "role") {
+          opts = (await listRoles()).map((r) => ({ label: `${r.name}（${r.code}）`, value: r.id }));
+        } else {
+          const page = await listUsers({ page: 1, page_size: 100 });
+          opts = page.items.map((u) => ({ label: `${u.name}（${u.email}）`, value: u.id }));
+        }
+        if (!cancelled) setGrantOptions(opts);
+      } catch {
+        if (!cancelled) setGrantOptions([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [grantType]);
+
+  const submitAddGrant = async () => {
+    if (!selected || grantTarget == null) return;
+    setGrantAdding(true);
+    try {
+      await addDatasetGrant(selected.id, grantType, grantTarget);
+      setGrantTarget(null);
+      await loadGrants();
+      void loadAudit();
+    } catch (e) {
+      message.error(extractDetail(e, "授权失败"));
+    } finally {
+      setGrantAdding(false);
+    }
+  };
+
+  const confirmRemoveGrant = async (g: KbGrant) => {
+    if (!selected) return;
+    try {
+      await removeDatasetGrant(selected.id, g.principal_type, g.principal_id);
+      await loadGrants();
+      void loadAudit();
+    } catch (e) {
+      message.error(extractDetail(e, "移除失败"));
+    }
   };
 
   const uploadProps = {
@@ -198,6 +351,11 @@ export default function Knowledge() {
         <Button icon={<ReloadOutlined />} onClick={() => void loadDatasets()} loading={datasetsLoading}>
           刷新
         </Button>
+        {isAdmin && (
+          <Button type="primary" icon={<FileAddOutlined />} onClick={() => setCreateDsOpen(true)}>
+            新建知识库
+          </Button>
+        )}
       </div>
 
       <div className="admin-table">
@@ -225,6 +383,23 @@ export default function Knowledge() {
               ),
             },
             { title: "创建时间", dataIndex: "created_at", width: 180, render: fmtTime },
+            ...(isAdmin
+              ? [
+                  {
+                    title: "",
+                    key: "op",
+                    width: 60,
+                    render: (_: unknown, ds: KbDataset) => (
+                      <Popconfirm
+                        title={`删除整个知识库「${ds.name}」？文档与向量将一并从 Dify 删除`}
+                        onConfirm={() => void confirmDeleteDataset(ds)}
+                      >
+                        <Button danger size="small" type="text" icon={<DeleteOutlined />} />
+                      </Popconfirm>
+                    ),
+                  },
+                ]
+              : []),
           ]}
         />
       </div>
@@ -249,6 +424,11 @@ export default function Knowledge() {
                   添加文本
                 </Button>
               </>
+            )}
+            {isAdmin && (
+              <Button icon={<TeamOutlined />} onClick={() => setGrantsOpen(true)}>
+                授权
+              </Button>
             )}
             <Button icon={<ReloadOutlined />} onClick={() => void loadDocs()} loading={docsLoading}>
               刷新
@@ -372,6 +552,159 @@ export default function Knowledge() {
           </Form.Item>
         </Form>
       </Modal>
+
+      <Modal
+        title="新建知识库"
+        open={createDsOpen}
+        onOk={() => void submitCreateDataset()}
+        onCancel={() => setCreateDsOpen(false)}
+        confirmLoading={creatingDs}
+        destroyOnHidden
+      >
+        <Form
+          form={createDsForm}
+          layout="vertical"
+          style={{ marginTop: 12 }}
+          initialValues={{ indexing_technique: "high_quality" }}
+        >
+          <Form.Item name="name" label="名称" rules={[{ required: true, message: "请输入名称" }]}>
+            <Input placeholder="如：产品手册" maxLength={100} />
+          </Form.Item>
+          <Form.Item name="indexing_technique" label="索引模式" rules={[{ required: true }]}>
+            <Select
+              options={[
+                { value: "high_quality", label: "高质量（向量检索，需 embedding 模型）" },
+                { value: "economy", label: "经济（关键词检索，占用小）" },
+              ]}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Drawer
+        title={`授权「${selected?.name ?? ""}」`}
+        width={480}
+        open={grantsOpen}
+        onClose={() => setGrantsOpen(false)}
+      >
+        <p style={{ color: "var(--text-muted)", fontSize: 12.5, marginTop: 0 }}>
+          租户隔离：未授权的成员看不到此库。可见 = 用户直授 ∪ 部门 ∪ 角色；管理员不受限。
+        </p>
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          <Select
+            style={{ width: 90 }}
+            value={grantType}
+            onChange={(v) => {
+              setGrantType(v as PrincipalType);
+              setGrantTarget(null);
+            }}
+            options={(Object.keys(PRINCIPAL_LABEL) as PrincipalType[]).map((t) => ({
+              value: t,
+              label: PRINCIPAL_LABEL[t],
+            }))}
+          />
+          <Select
+            style={{ flex: 1 }}
+            showSearch
+            optionFilterProp="label"
+            placeholder="选择授权对象"
+            value={grantTarget}
+            onChange={setGrantTarget}
+            options={grantOptions}
+          />
+          <Button
+            type="primary"
+            disabled={grantTarget == null}
+            loading={grantAdding}
+            onClick={() => void submitAddGrant()}
+          >
+            添加
+          </Button>
+        </div>
+        <Table<KbGrant>
+          rowKey={(g) => `${g.principal_type}-${g.principal_id}`}
+          size="small"
+          loading={grantsLoading}
+          dataSource={grants}
+          pagination={false}
+          locale={{ emptyText: <Empty description="暂无授权（仅管理员可见此库）" /> }}
+          columns={[
+            {
+              title: "类型",
+              dataIndex: "principal_type",
+              width: 70,
+              render: (t: PrincipalType) => <Tag>{PRINCIPAL_LABEL[t] ?? t}</Tag>,
+            },
+            { title: "名称", key: "name", render: (_, g) => g.name ?? `#${g.principal_id}` },
+            {
+              title: "",
+              key: "op",
+              width: 60,
+              render: (_, g) => (
+                <Popconfirm title="移除该授权？" onConfirm={() => void confirmRemoveGrant(g)}>
+                  <Button danger size="small" type="text" icon={<DeleteOutlined />} />
+                </Popconfirm>
+              ),
+            },
+          ]}
+        />
+      </Drawer>
+
+      {isAdmin && (
+        <>
+          <div className="page-header" style={{ marginTop: 12 }}>
+            <span className="page-header-title" style={{ fontSize: 15 }}>
+              操作审计
+            </span>
+            <span className="page-header-sub">建库/删库/文档增删/授权变更全部落库（契约 v9）</span>
+          </div>
+          <div className="admin-toolbar">
+            <Button icon={<ReloadOutlined />} onClick={() => void loadAudit()} loading={auditLoading}>
+              刷新
+            </Button>
+          </div>
+          <div className="admin-table">
+            <Table<KbAuditItem>
+              rowKey="id"
+              size="small"
+              loading={auditLoading}
+              dataSource={audit.items}
+              pagination={{ total: audit.total, pageSize: 20, size: "small" }}
+              locale={{ emptyText: <Empty description="暂无操作记录" /> }}
+              columns={[
+                { title: "时间", dataIndex: "created_at", width: 170, render: fmtTime },
+                { title: "操作人", key: "user", width: 100, render: (_, a) => a.user ?? "—" },
+                { title: "动作", dataIndex: "action", width: 150 },
+                {
+                  title: "知识库",
+                  dataIndex: "dataset_id",
+                  width: 150,
+                  ellipsis: true,
+                  render: (v: string | null) => {
+                    const ds = datasets.find((d) => d.id === v);
+                    return ds?.name ?? v ?? "—";
+                  },
+                },
+                {
+                  title: "详情",
+                  dataIndex: "detail",
+                  ellipsis: true,
+                  render: (v: string | null) => {
+                    if (!v) return "—";
+                    try {
+                      return Object.entries(JSON.parse(v))
+                        .map(([k, val]) => `${k}=${String(val)}`)
+                        .join(" · ");
+                    } catch {
+                      return v;
+                    }
+                  },
+                },
+              ]}
+            />
+          </div>
+        </>
+      )}
     </div>
   );
 }

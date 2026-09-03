@@ -292,3 +292,43 @@ async def test_retrieval_metadata_condition_passthrough(client: AsyncClient):
     })
     assert r.status_code == 200
     assert captured[-1]["metadata_condition"]["conditions"][0]["value"] == "给排水"
+
+
+# ---- W3+: 问答代理 + 知识库 CRUD ----
+
+from app.ragflow.client import RagflowClient
+
+
+def fake_full_ragflow(captured: list) -> RagflowClient:
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append({"method": request.method, "url": str(request.url)})
+        if request.url.path.endswith("/chats") and request.method == "GET":
+            return httpx.Response(200, json={"code": 0, "data": {"chats": []}})
+        if request.url.path.endswith("/chats") and request.method == "POST":
+            return httpx.Response(200, json={"code": 0, "data": {"id": "chat-9"}})
+        return httpx.Response(200, json={"code": 0, "data": []})
+    return RagflowClient(base_url="http://f", api_key="k", transport=httpx.MockTransport(handler))
+
+
+async def test_chat_assistant_endpoint(client: AsyncClient):
+    captured: list = []
+    _override(fake_full_ragflow(captured))
+    await login(client)
+    r = await client.get("/api/rag/chat/assistant")
+    assert r.status_code == 200 and r.json()["chat_id"] == "chat-9"
+    # 建 assistant 前应先绑默认 chat 模型
+    methods = [(c["method"], c["url"].split("/v1/")[-1].split("?")[0]) for c in captured]
+    assert ("PATCH", "models/default") in methods
+
+
+async def test_dataset_crud_endpoints(client: AsyncClient):
+    captured: list = []
+    _override(fake_full_ragflow(captured))
+    await login(client)
+    r = await client.request("DELETE", "/api/rag/datasets/ds-1")
+    assert r.status_code == 204
+    r = await client.patch("/api/rag/datasets/ds-1", json={"name": "新名"})
+    assert r.status_code == 200
+    r = await client.request("DELETE", "/api/rag/datasets/ds-1/documents", json={"ids": ["d1"]})
+    assert r.status_code == 204
+    assert any(c["method"] == "DELETE" and c["url"].endswith("/datasets/ds-1/documents") for c in captured)

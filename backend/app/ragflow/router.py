@@ -7,6 +7,8 @@
 import logging
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -192,6 +194,106 @@ async def tag_document(
     except RagflowError as e:
         raise _map_upstream(e) from e
     return {"document_id": document_id, "meta_fields": meta}
+
+
+# ---- 问答（检索+LLM+引用，RAGFlow Chat Assistant） ----
+
+
+class RagChatMessage(BaseModel):
+    role: str = Field(pattern="^(user|assistant|system)$")
+    content: str = Field(min_length=1, max_length=8192)
+
+
+class RagChatBody(BaseModel):
+    messages: list[RagChatMessage] = Field(min_length=1, max_length=40)
+
+
+@router.get("/chat/assistant")
+async def ensure_chat_assistant(
+    user: User = Depends(current_user),
+    client: RagflowClient = Depends(get_ragflow),
+) -> dict:
+    """确保本租户存在 portal-assistant（绑定默认库），返回 chat_id。"""
+    _require_ragflow(client)
+    try:
+        ds = await client.list_datasets()
+        ids = [d["id"] for d in (ds.get("data") or [])] or []
+        chat_id = await client.ensure_chat(ids[:1])
+    except RagflowError as e:
+        raise _map_upstream(e) from e
+    return {"chat_id": chat_id}
+
+
+@router.post("/chat/completions")
+async def chat_completions(
+    payload: RagChatBody,
+    user: User = Depends(current_user),
+    client: RagflowClient = Depends(get_ragflow),
+):
+    """部门知识库问答（SSE 流式，OpenAI 兼容透传，含引用）。"""
+    _require_ragflow(client)
+    try:
+        ds = await client.list_datasets()
+        ids = [d["id"] for d in (ds.get("data") or [])] or []
+        chat_id = await client.ensure_chat(ids[:1])
+        stream = await client.stream_chat(chat_id, [m.model_dump() for m in payload.messages])
+    except RagflowError as e:
+        raise _map_upstream(e) from e
+    return StreamingResponse(stream, media_type="text/event-stream")
+
+
+# ---- 知识库 CRUD ----
+
+
+@router.delete("/datasets/{dataset_id}", status_code=204)
+async def delete_dataset(
+    dataset_id: str,
+    user: User = Depends(current_user),
+    client: RagflowClient = Depends(get_ragflow),
+) -> None:
+    _require_ragflow(client)
+    try:
+        await client.delete_dataset(dataset_id)
+    except RagflowError as e:
+        raise _map_upstream(e) from e
+
+
+class RagDatasetUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    description: str | None = Field(default=None, max_length=512)
+
+
+@router.patch("/datasets/{dataset_id}")
+async def update_dataset(
+    dataset_id: str,
+    payload: RagDatasetUpdate,
+    user: User = Depends(current_user),
+    client: RagflowClient = Depends(get_ragflow),
+) -> dict:
+    _require_ragflow(client)
+    try:
+        await client.update_dataset(dataset_id, payload.name, payload.description)
+    except RagflowError as e:
+        raise _map_upstream(e) from e
+    return {"id": dataset_id}
+
+
+class RagDocDelete(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=100)
+
+
+@router.delete("/datasets/{dataset_id}/documents", status_code=204)
+async def delete_documents(
+    dataset_id: str,
+    payload: RagDocDelete,
+    user: User = Depends(current_user),
+    client: RagflowClient = Depends(get_ragflow),
+) -> None:
+    _require_ragflow(client)
+    try:
+        await client.delete_documents(dataset_id, payload.ids)
+    except RagflowError as e:
+        raise _map_upstream(e) from e
 
 
 # ---- 租户绑定管理（PLATFORM_ADMIN） ----

@@ -59,7 +59,63 @@ class RagflowClient:
             raise RagflowError(502, str(body.get("message") or body.get("code")))
         return body
 
-    # ---- datasets ----
+    # ---- datasets CRUD ----
+
+    async def delete_dataset(self, dataset_id: str) -> None:
+        await self._request("DELETE", f"/api/v1/datasets/{dataset_id}")
+
+    async def update_dataset(self, dataset_id: str, name: str | None = None, description: str | None = None) -> None:
+        body = {k: v for k, v in {"name": name, "description": description}.items() if v is not None}
+        await self._request("PUT", f"/api/v1/datasets/{dataset_id}", json=body)
+
+    async def delete_documents(self, dataset_id: str, document_ids: list[str]) -> None:
+        await self._request(
+            "DELETE",
+            f"/api/v1/datasets/{dataset_id}/documents",
+            json={"ids": document_ids},
+        )
+
+    # ---- chat assistant（问答：检索+LLM+引用一站式） ----
+
+    async def list_chats(self) -> list[dict]:
+        body = await self._request("GET", "/api/v1/chats")
+        data = body.get("data") or {}
+        return data.get("chats", []) if isinstance(data, dict) else data or []
+
+    async def create_chat(self, name: str, dataset_ids: list[str]) -> str:
+        """返回 chat_id（租户默认 LLM 由 onboarding/ensure 绑定）。"""
+        body = await self._request(
+            "POST", "/api/v1/chats", json={"name": name, "dataset_ids": dataset_ids}
+        )
+        data = body.get("data") or {}
+        chat_id = data.get("id") or ""
+        if not chat_id:
+            raise RagflowError(502, f"no chat id in response: {body}")
+        return chat_id
+
+    async def set_default_chat_model(self) -> None:
+        """租户默认 chat 模型 → SILICONFLOW（幂等，确保问答可用）。"""
+        await self._request(
+            "PATCH",
+            "/api/v1/models/default",
+            json={
+                "model_type": "chat",
+                "model_provider": "SILICONFLOW",
+                "model_instance": "sf-main",
+                "model_name": settings.SILICONFLOW_CHAT_MODEL,
+            },
+        )
+
+    async def ensure_chat(self, dataset_ids: list[str]) -> str:
+        """找名叫 portal-assistant 的助手，没有则建；返回 chat_id。"""
+        for c in await self.list_chats():
+            if c.get("name") == "portal-assistant":
+                return c["id"]
+        try:
+            await self.set_default_chat_model()
+        except RagflowError:
+            pass  # 已绑过则忽略
+        return await self.create_chat("portal-assistant", dataset_ids)
 
     async def create_dataset(self, name: str, description: str = "") -> dict:
         """返回 data 字段（含 id）。v0.26 的 id 在 data.id 而非顶层（spike 实测）。"""
@@ -73,6 +129,24 @@ class RagflowClient:
             "GET", "/api/v1/datasets", params={"page": page, "page_size": page_size}
         )
         return body
+
+    async def stream_chat(self, chat_id: str, messages: list[dict]):
+        """OpenAI 兼容流式问答（SSE 逐块产出 bytes）。"""
+        async def gen():
+            async with self._client.stream(
+                "POST",
+                f"/api/v1/openai/{chat_id}/chat/completions",
+                headers={"Authorization": f"Bearer {self._api_key}"},
+                json={"model": "model", "messages": messages, "stream": True,
+                      "extra_body": {"reference": True}},
+            ) as resp:
+                if resp.status_code >= 400:
+                    text = (await resp.aread()).decode()[:300]
+                    yield f'data: {{"error": "{text}"}}\n\n'.encode()
+                    return
+                async for line in resp.aiter_bytes():
+                    yield line
+        return gen()
 
     # ---- documents ----
 

@@ -38,6 +38,14 @@ export const ragApi = {
     http.post<{ meta_fields: Record<string, string> }>(
       `/rag/datasets/${datasetId}/documents/${docId}/tag`,
     ),
+  ensureChat: () => http.get<{ chat_id: string }>("/rag/chat/assistant"),
+  deleteDataset: (id: string) => http.delete(`/rag/datasets/${id}`),
+  updateDataset: (id: string, body: { name?: string; description?: string }) =>
+    http.patch(`/rag/datasets/${id}`, body),
+  createDataset: (name: string, description = "") =>
+    http.post<{ id: string; name: string }>("/rag/datasets", { name, description }),
+  deleteDocuments: (datasetId: string, ids: string[]) =>
+    http.delete(`/rag/datasets/${datasetId}/documents`, { data: { ids } }),
   retrieve: (
     question: string,
     datasetIds: string[],
@@ -59,3 +67,4 @@ export const ragApi = {
         : {}),
     }),
 };
+export const ragChatUrl = "/api/rag/chat/completions";

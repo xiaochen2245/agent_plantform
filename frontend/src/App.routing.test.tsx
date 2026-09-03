@@ -69,14 +69,14 @@ describe("路由守卫与侧栏权限渲染", () => {
     expect(screen.getByText("应 用")).toBeTruthy();
   });
 
-  it("四大应用占位路由渲染 ComingSoon（文档审查）", () => {
+  it("文档审查路由渲染 Review 应用页（#32）", () => {
     setLocation(USER);
     render(
       <MemoryRouter initialEntries={["/apps/review"]}>
         <App />
       </MemoryRouter>
     );
-    expect(screen.getByText("文档审查")).toBeTruthy();
-    expect(screen.getByText(/W4 切片/)).toBeTruthy();
+    expect(screen.getByText("审查")).toBeTruthy();
+    expect(screen.getByText("报告问答")).toBeTruthy();
   });
 });

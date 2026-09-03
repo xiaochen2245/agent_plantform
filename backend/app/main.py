@@ -25,6 +25,7 @@ from app.files.cleanup import sweep_expired_uploads
 from app.files.router import router as files_router
 from app.kb.router import router as kb_router
 from app.ragflow.router import router as rag_router
+from app.review.router import router as review_router
 from app.models.app import App
 
 _logger = logging.getLogger("app.main")
@@ -92,6 +93,7 @@ app.include_router(chat_router)
 app.include_router(files_router)
 app.include_router(kb_router)
 app.include_router(rag_router)
+app.include_router(review_router)
 app.include_router(conversations_router)
 app.include_router(depts_router)
 app.include_router(roles_router)

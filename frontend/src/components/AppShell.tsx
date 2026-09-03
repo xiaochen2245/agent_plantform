@@ -22,18 +22,12 @@ export default function AppShell() {
 
   const navItems = [
     {
-      section: "编 辑",
+      section: "应 用",
       items: [
-        { to: "/workbench", icon: <AppstoreOutlined />, label: "Agent 工作台" },
-        { to: "/workflows", icon: <ApartmentOutlined />, label: "工作流编排" },
+        { to: "/", icon: <AppstoreOutlined />, label: "首页" },
         { to: "/kb", icon: <FolderOutlined />, label: "知识库" },
-      ],
-    },
-    {
-      section: "员 工 端",
-      items: [
-        { to: "/", icon: <MessageOutlined />, label: "对话" },
         { to: "/history", icon: <HistoryOutlined />, label: "历史会话" },
+        { to: "/workbench", icon: <ApartmentOutlined />, label: "Agent 工作台" },
       ],
     },
     ...(isAdmin

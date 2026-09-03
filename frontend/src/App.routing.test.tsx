@@ -40,8 +40,8 @@ describe("路由守卫与侧栏权限渲染", () => {
         <App />
       </MemoryRouter>
     );
-    // 重定向回首页：聊天空态出现（等 apps 加载完），管理表格不出现
-    expect(await screen.findByText(/提出你的第一个问题|选择上方 Agent/)).toBeTruthy();
+    // 重定向回首页：应用入口页出现，管理表格不出现
+    expect(await screen.findByText("企业知识平台")).toBeTruthy();
     expect(screen.queryByText("权限管理")).toBeNull();
   });
 
@@ -66,19 +66,17 @@ describe("路由守卫与侧栏权限渲染", () => {
       </MemoryRouter>
     );
     expect(screen.queryByText("管 理")).toBeNull();
-    expect(screen.getByText("编 辑")).toBeTruthy();
-    expect(screen.getByText("员 工 端")).toBeTruthy();
+    expect(screen.getByText("应 用")).toBeTruthy();
   });
 
-  it("编辑端占位路由渲染 ComingSoon", () => {
+  it("四大应用占位路由渲染 ComingSoon（文档审查）", () => {
     setLocation(USER);
     render(
-      <MemoryRouter initialEntries={["/workflows"]}>
+      <MemoryRouter initialEntries={["/apps/review"]}>
         <App />
       </MemoryRouter>
     );
-    // 侧栏项 + 页面标题同名（两处），描述文案唯一
-    expect(screen.getAllByText("工作流编排").length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText(/节点画布/)).toBeTruthy();
+    expect(screen.getByText("文档审查")).toBeTruthy();
+    expect(screen.getByText(/W4 切片/)).toBeTruthy();
   });
 });

@@ -30,17 +30,10 @@ from app.models import AppAuthorization, Role, user_roles
 
 # 契约 docs/api-contract.md §Apps 的 Agent（id 显式固定对齐契约；v3 增补 app 4 工作流模式）
 SEED_APPS: list[tuple[int, str, str, str, str, list | None]] = [
-    (1, "app-test-001", "IT 运维助手", "解答服务器、网络与账号问题", "chat", None),
-    (2, "app-test-002", "报销政策问答", "差旅与报销规则查询", "chat", None),
-    (3, "app-test-003", "代码评审助手", "MR 预审与规范检查", "agent", None),
-    (
-        4,
-        "app-test-004",
-        "名片生成助手",
-        "输入名片信息，生成排版名片",
-        "workflow",
-        [{"name": "business_card", "label": "名片内容", "type": "paragraph", "required": True}],
-    ),
+    (1, "app-kb", "知识库", "部门知识入库、自动打标与跨项目经验检索", "kb", None),
+    (2, "app-review", "文档审查", "错别字与格式规范检查、长文档数据一致性", "review", None),
+    (3, "app-compare", "智能比对", "招标评分表与投标文件结构化拆解与逐项比对", "compare", None),
+    (4, "app-generate", "智能生成", "基于历史标书与模板生成技术方案与汇报材料", "generate", None),
 ]
 
 SEED_ROLES: list[tuple[int, str, str]] = [

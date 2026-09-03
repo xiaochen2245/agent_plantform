@@ -107,7 +107,8 @@ class RagflowClient:
         )
 
     async def ensure_chat(self, dataset_ids: list[str]) -> str:
-        """找名叫 portal-assistant 的助手，没有则建；返回 chat_id。"""
+        """找名叫 portal-assistant 的助手，没有则建；返回 chat_id。
+        空库（无已解析文件）时降级为无库助手（纯 LLM 问答）。"""
         for c in await self.list_chats():
             if c.get("name") == "portal-assistant":
                 return c["id"]
@@ -115,7 +116,12 @@ class RagflowClient:
             await self.set_default_chat_model()
         except RagflowError:
             pass  # 已绑过则忽略
-        return await self.create_chat("portal-assistant", dataset_ids)
+        try:
+            return await self.create_chat("portal-assistant", dataset_ids)
+        except RagflowError as e:
+            if "doesn't own parsed file" in e.message and dataset_ids:
+                return await self.create_chat("portal-assistant", [])
+            raise
 
     async def create_dataset(self, name: str, description: str = "") -> dict:
         """返回 data 字段（含 id）。v0.26 的 id 在 data.id 而非顶层（spike 实测）。"""

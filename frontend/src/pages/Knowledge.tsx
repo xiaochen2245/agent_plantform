@@ -253,7 +253,10 @@ export default function Knowledge() {
           opts = items.map((d) => ({ label: d.name, value: d.id }));
         } else if (grantType === "role") {
           const { items } = await listRoles();
-          opts = items.map((r) => ({ label: `${r.name}（${r.code}）`, value: r.id }));
+          // 超管不受授权约束：不作为可授权主体出现
+          opts = items
+            .filter((r) => r.code !== "PLATFORM_ADMIN")
+            .map((r) => ({ label: `${r.name}（${r.code}）`, value: r.id }));
         } else {
           const page = await listUsers({ page: 1, page_size: 100 });
           opts = page.items.map((u) => ({ label: `${u.name}（${u.email}）`, value: u.id }));

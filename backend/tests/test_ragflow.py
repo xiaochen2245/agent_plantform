@@ -106,7 +106,7 @@ async def test_create_dataset_needs_binding(client: AsyncClient):
 
 async def test_create_dataset_and_upload_flow(client: AsyncClient, monkeypatch):
     captured: list = []
-    monkeypatch.setattr("app.ragflow.router.spawn_autotag", lambda *a: None)  # 后台轮询单测另测
+    monkeypatch.setattr("app.ragflow.router.spawn_autotag", lambda *a, **k: None)  # 后台轮询单测另测
     _override(fake_ragflow(captured))
     await login(client)  # admin
     r = await client.post("/api/rag/datasets", json={"name": "评分表库"})
@@ -341,16 +341,17 @@ async def test_dataset_crud_endpoints(client: AsyncClient):
 async def test_upload_spawns_autotag(client: AsyncClient, monkeypatch):
     spawned: list = []
     monkeypatch.setattr("app.ragflow.router.spawn_autotag",
-                        lambda c, ds, ids: spawned.append((ds, ids)))
+                        lambda c, ds, ids, user_id: spawned.append((ds, ids, user_id)))
     _override(fake_ragflow())
     await login(client)
+    admin_id = 1  # 种子管理员固定首行 id
     r = await client.post(
         "/api/rag/datasets/ds-1/documents",
         files={"files": ("评分表.docx", b"fake-docx-bytes",
                          "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
     )
     assert r.status_code == 202, r.text
-    assert spawned == [("ds-1", ["doc-1"])], "upload must schedule autotag for each doc"
+    assert spawned == [("ds-1", ["doc-1"], admin_id)], "upload must schedule autotag w/ user"
 
 
 class _AutotagFake:
@@ -381,7 +382,7 @@ async def test_tag_when_done_writes_meta(monkeypatch):
 
     monkeypatch.setattr(autotag, "Tagger", FakeTagger)
     fake = _AutotagFake("DONE")
-    await autotag.tag_when_done(fake, "ds-1", "d1")
+    await autotag.tag_when_done(fake, "ds-1", "d1", user_id=1)
     metas = [c for c in fake.calls if isinstance(c, tuple)]
     assert metas and metas[0][1]["project"] == "XX管网改造"
 
@@ -391,11 +392,75 @@ async def test_tag_when_done_fail_and_timeout(monkeypatch):
 
     # 解析失败 → 放弃，不拉 chunks 不写 meta
     fake = _AutotagFake("FAIL")
-    await autotag.tag_when_done(fake, "ds-1", "d1")
+    await autotag.tag_when_done(fake, "ds-1", "d1", user_id=1)
     assert fake.calls == ["list"]
 
     # 一直 RUNNING + 超时 0 → 立即放弃
     fake = _AutotagFake("RUNNING")
     monkeypatch.setattr(autotag, "POLL_TIMEOUT", 0)
-    await autotag.tag_when_done(fake, "ds-1", "d1")
+    await autotag.tag_when_done(fake, "ds-1", "d1", user_id=1)
     assert fake.calls == ["list"]
+
+
+# ---- #28 写操作审计：每写一单 + admin 可查 / 非 admin 403 ----
+
+
+async def test_rag_write_ops_audited(client: AsyncClient, monkeypatch):
+    monkeypatch.setattr("app.ragflow.router.spawn_autotag", lambda *a, **k: None)
+    fake = fake_ragflow()
+
+    def handler(request):
+        if "/chunks" in request.url.path and request.method == "GET":
+            return httpx.Response(200, json={"code": 0, "data": {"chunks": [
+                {"content": "审查意见：管道埋深"}] * 3}})
+        return httpx.Response(200, json={"code": 0, "data": []})
+
+    fake._client._transport = httpx.MockTransport(handler)
+    _override(fake)
+    await login(client)
+    docx = ("评分表.docx", b"x",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    await client.post("/api/rag/datasets", json={"name": "库1"})
+    await client.post("/api/rag/datasets/ds-1/documents", files={"files": docx})
+    await client.post("/api/rag/datasets/ds-1/documents/doc-1/tag")
+    await client.request("DELETE", "/api/rag/datasets/ds-1/documents", json={"ids": ["doc-1"]})
+    await client.request("DELETE", "/api/rag/datasets/ds-1")
+
+    r = await client.get("/api/rag/audit")
+    assert r.status_code == 200, r.text
+    actions = [l["action"] for l in r.json()["logs"]]
+    for expected in ("dataset.create", "doc.upload", "doc.tag", "doc.delete", "dataset.delete"):
+        assert expected in actions, f"{expected} missing in {actions}"
+    tag_log = next(l for l in r.json()["logs"] if l["action"] == "doc.tag")
+    assert tag_log["user_id"] == 1 and tag_log["user_name"] == "平台管理员"
+    assert "doc-1" in tag_log["detail"]
+
+    # user_id 过滤
+    r = await client.get("/api/rag/audit", params={"user_id": 999})
+    assert r.json()["logs"] == []
+
+
+async def test_rag_audit_requires_admin(client: AsyncClient):
+    await mkuser("plain@company.com", role_codes=("USER",))
+    await login(client, email="plain@company.com", password="guest-pass-123")
+    r = await client.get("/api/rag/audit")
+    assert r.status_code == 403
+
+
+async def test_autotag_writes_audit(monkeypatch):
+    from app.db.session import SessionLocal
+    from app.models.rag_audit import RagAuditLog
+    from app.ragflow import autotag
+    from sqlalchemy import select
+
+    class FakeTagger(Tagger):
+        async def extract(self, chunks):
+            return ExtractedLabels(project="XX管网")
+
+    monkeypatch.setattr(autotag, "Tagger", FakeTagger)
+    fake = _AutotagFake("DONE")
+    await autotag.tag_when_done(fake, "ds-1", "d1", user_id=7)
+    async with SessionLocal() as s:
+        row = await s.scalar(select(RagAuditLog).where(RagAuditLog.action == "doc.tag"))
+    assert row is not None and row.user_id == 7
+    assert "autotag" in (row.detail or "")

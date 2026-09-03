@@ -5,8 +5,11 @@
 - client 复用请求依赖注入的实例（缓存于 app.state，lifespan 统一关闭）。
 """
 import asyncio
+import json
 import logging
 
+from app.db.session import SessionLocal
+from app.models.rag_audit import RagAuditLog
 from app.ragflow.client import RagflowClient, RagflowError
 from app.ragflow.tagging import Tagger
 
@@ -18,9 +21,11 @@ POLL_TIMEOUT = 15 * 60  # 秒；超时放弃转人工重试（大 PDF 量级）
 _tasks: set[asyncio.Task] = set()  # 持引用防 GC；done 自动摘除
 
 
-def spawn_autotag(client: RagflowClient, dataset_id: str, document_ids: list[str]) -> None:
+def spawn_autotag(
+    client: RagflowClient, dataset_id: str, document_ids: list[str], user_id: int
+) -> None:
     for doc_id in document_ids:
-        t = asyncio.create_task(tag_when_done(client, dataset_id, doc_id))
+        t = asyncio.create_task(tag_when_done(client, dataset_id, doc_id, user_id))
         _tasks.add(t)
         t.add_done_callback(_tasks.discard)
 
@@ -38,7 +43,24 @@ async def _find_doc(client: RagflowClient, dataset_id: str, document_id: str) ->
         page += 1
 
 
-async def _tag(client: RagflowClient, dataset_id: str, document_id: str) -> None:
+async def _audit(user_id: int, action: str, dataset_id: str, **detail) -> None:
+    """后台任务审计：独立会话写入，失败仅记日志（不阻断任务）。"""
+    try:
+        async with SessionLocal() as s:
+            s.add(
+                RagAuditLog(
+                    user_id=user_id,
+                    action=action,
+                    dataset_id=dataset_id,
+                    detail=json.dumps(detail, ensure_ascii=False),
+                )
+            )
+            await s.commit()
+    except Exception as e:  # noqa: BLE001
+        _logger.warning("autotag audit write failed: %s", e)
+
+
+async def _tag(client: RagflowClient, dataset_id: str, document_id: str, user_id: int) -> None:
     chunks = await client.list_chunks(dataset_id, document_id)
     if not chunks:
         _logger.warning("autotag no chunks ds=%s doc=%s", dataset_id, document_id)
@@ -49,9 +71,12 @@ async def _tag(client: RagflowClient, dataset_id: str, document_id: str) -> None
         return
     await client.update_document_meta(dataset_id, document_id, Tagger.to_meta_fields(labels))
     _logger.info("autotag done ds=%s doc=%s project=%s", dataset_id, document_id, labels.project)
+    await _audit(user_id, "doc.tag", dataset_id, document_id=document_id, source="autotag")
 
 
-async def tag_when_done(client: RagflowClient, dataset_id: str, document_id: str) -> None:
+async def tag_when_done(
+    client: RagflowClient, dataset_id: str, document_id: str, user_id: int
+) -> None:
     """轮询解析状态：DONE → 打标；FAIL/CANCEL/超时/上游错误 → 记日志退出。"""
     deadline = asyncio.get_running_loop().time() + POLL_TIMEOUT
     while True:
@@ -66,7 +91,7 @@ async def tag_when_done(client: RagflowClient, dataset_id: str, document_id: str
             return
         if run == "DONE":
             try:
-                await _tag(client, dataset_id, document_id)
+                await _tag(client, dataset_id, document_id, user_id)
             except RagflowError as e:
                 _logger.warning("autotag tag error ds=%s doc=%s: %s", dataset_id, document_id, e.message)
             return

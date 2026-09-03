@@ -22,9 +22,18 @@
 
 共享文件改动：改前在 issue 里说明意图；由 Stream D 合并。
 
-## AI Agent 接入（GitHub MCP）
+## AI Agent 接入
 
-双方向各自的 agent 宿主配置官方 GitHub MCP server，即可让 agent 读写 issue/PR/看板：
+**首选：gh CLI**（agent 能跑命令行就用这个，能力最全、零额外封装）：
+
+```bash
+gh auth login                 # 一次性
+gh issue list --label stream-B        # 拉实时任务
+gh issue comment 30 --body "进度: 60% —— 规则引擎骨架完成"
+gh issue close 30 --comment "验收达成, PR #xx 合并"
+```
+
+**备选：GitHub MCP**（仅当 agent 无 shell 时）：
 
 ```json
 {
@@ -41,7 +50,7 @@
 ```
 
 - PAT 创建：GitHub → Settings → Developer settings → Personal access tokens（勾 `repo`、`project`、`read:org`）
-- Agent 常用动作：`list_issues`（拉实时任务）、`update_issue`（评论进度/改状态）、`create_pull_request`
+- gh 与 MCP 能力等价（PAT scope 要求也相同）；有命令行一律用 gh
 - 约定：agent 更新进度时评论格式 `进度: <百分比/状态> —— <一句话>`，人来判断是否 close
 
 ## 环境与部署

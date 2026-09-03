@@ -176,6 +176,8 @@ describe("角色管理 Tab", () => {
     expect(adminRow).toBeTruthy();
     const disabledDel = adminRow.querySelector("button.ant-btn-dangerous[disabled]");
     expect(disabledDel?.textContent).toMatch(/删除/);
+    // 超管不受授权约束：其行不渲染「授权 Agent」入口
+    expect(adminRow.textContent).not.toContain("授权 Agent");
   });
 
   it("删除自定义角色：调用 DELETE /api/admin/roles/{id}", async () => {

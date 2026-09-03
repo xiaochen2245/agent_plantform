@@ -175,14 +175,17 @@ export default function RolesTab() {
               key: "actions",
               render: (_, r) => (
                 <div style={{ display: "flex", gap: 8 }}>
-                  <Button
-                    type="link"
-                    size="small"
-                    icon={<TeamOutlined />}
-                    onClick={() => setAuthTarget(r)}
-                  >
-                    授权 Agent
-                  </Button>
+                  {/* 超管不受授权约束，不提供无意义入口（防误解） */}
+                  {r.code !== "PLATFORM_ADMIN" && (
+                    <Button
+                      type="link"
+                      size="small"
+                      icon={<TeamOutlined />}
+                      onClick={() => setAuthTarget(r)}
+                    >
+                      授权 Agent
+                    </Button>
+                  )}
                   <Button
                     type="link"
                     size="small"

@@ -272,8 +272,12 @@ export default function UsersTab() {
       key: "actions",
       width: 80,
       render: (_: unknown, record: AdminUser) => {
+        // 超管不受授权约束：不展示「授权 Agent」入口（展示即误导）
+        const isSuperAdmin = record.roles?.includes("PLATFORM_ADMIN") ?? false;
         const items: MenuProps["items"] = [
-          { key: "auth", icon: <TeamOutlined />, label: "授权 Agent" },
+          ...(isSuperAdmin
+            ? []
+            : [{ key: "auth", icon: <TeamOutlined />, label: "授权 Agent" }]),
           { key: "dept", icon: <ApartmentOutlined />, label: "设置部门" },
           { key: "roles", icon: <SafetyOutlined />, label: "设置角色" },
           { key: "reset", icon: <KeyOutlined />, label: "重置密码" },

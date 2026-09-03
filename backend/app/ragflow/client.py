@@ -106,15 +106,36 @@ class RagflowClient:
         data = body.get("data") or {}
         return data.get("docs", []) if isinstance(data, dict) else data
 
+    async def list_chunks(
+        self, dataset_id: str, document_id: str, page: int = 1, page_size: int = 100
+    ) -> list[dict]:
+        """v0.26+ page_size 上限 100（超限报错）。"""
+        body = await self._request(
+            "GET",
+            f"/api/v1/datasets/{dataset_id}/documents/{document_id}/chunks",
+            params={"page": page, "page_size": min(page_size, 100)},
+        )
+        data = body.get("data") or {}
+        return data.get("chunks", []) if isinstance(data, dict) else []
+
+    async def update_document_meta(
+        self, dataset_id: str, document_id: str, meta_fields: dict
+    ) -> None:
+        await self._request(
+            "PATCH",
+            f"/api/v1/datasets/{dataset_id}/documents/{document_id}",
+            json={"meta_fields": meta_fields},
+        )
+
     # ---- retrieval ----
 
     async def retrieve(
-        self, question: str, dataset_ids: list[str], top_k: int = 5
+        self, question: str, dataset_ids: list[str], top_k: int = 5,
+        metadata_condition: dict | None = None,
     ) -> dict:
         """返回 data（chunks 在 data.chunks[]，含 content/similarity）。"""
-        body = await self._request(
-            "POST",
-            "/api/v1/retrieval",
-            json={"question": question, "dataset_ids": dataset_ids, "page_size": top_k},
-        )
-        return body.get("data") or {}
+        body: dict = {"question": question, "dataset_ids": dataset_ids, "page_size": top_k}
+        if metadata_condition:
+            body["metadata_condition"] = metadata_condition
+        payload = await self._request("POST", "/api/v1/retrieval", json=body)
+        return payload.get("data") or {}

@@ -7,16 +7,26 @@
 import logging
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import current_user, require_platform_admin
-from app.core.config import settings
+from app.core import vault
 from app.db.session import get_db
+from app.models.department import Department
+from app.models.ragflow_binding import RagflowBinding
 from app.models.user import User
 from app.ragflow.client import RagflowClient, RagflowError
 from app.ragflow.deps import get_ragflow
 from app.ragflow.parsing import route_for
-from app.schemas.rag import RagDatasetCreate, RagRetrievalQuery
+from app.ragflow.onboarding import ProvisionError, RagflowProvisioner
+from app.ragflow.tagging import Tagger
+from app.schemas.rag import (
+    MetadataCondition,
+    RagBindingCreate,
+    RagDatasetCreate,
+    RagRetrievalQuery,
+)
 
 router = APIRouter(prefix="/api/rag", tags=["rag"])
 
@@ -26,6 +36,7 @@ MAX_RAG_UPLOAD_BYTES = 50 * 1024 * 1024  # 50MB/文件（评分表/审查单体�
 
 
 def _require_ragflow(client: RagflowClient) -> None:
+    # 租户化后 client 一定带 key（无绑定时依赖层已 503）；保留给后备单租户 key 场景
     if not client._api_key:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE, "rag engine not configured"
@@ -54,7 +65,7 @@ async def list_datasets(
 @router.post("/datasets", status_code=201)
 async def create_dataset(
     payload: RagDatasetCreate,
-    user: User = Depends(require_platform_admin),
+    user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
     client: RagflowClient = Depends(get_ragflow),
 ) -> dict:
@@ -70,7 +81,7 @@ async def create_dataset(
 async def upload_documents(
     dataset_id: str,
     files: list[UploadFile] = File(...),
-    user: User = Depends(require_platform_admin),
+    user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
     client: RagflowClient = Depends(get_ragflow),
 ) -> dict:
@@ -129,8 +140,13 @@ async def retrieval(
     client: RagflowClient = Depends(get_ragflow),
 ) -> dict:
     _require_ragflow(client)
+    extra: dict = {}
+    if payload.metadata_condition:
+        extra["metadata_condition"] = payload.metadata_condition.model_dump()
     try:
-        data = await client.retrieve(payload.question, payload.dataset_ids, payload.top_k)
+        data = await client.retrieve(
+            payload.question, payload.dataset_ids, payload.top_k, **extra
+        )
     except RagflowError as e:
         raise _map_upstream(e) from e
     chunks = data.get("chunks") or []
@@ -144,3 +160,94 @@ async def retrieval(
             for c in chunks
         ]
     }
+
+
+# ---- 功能④：打标（入库后的业务标签抽取） ----
+
+
+@router.post("/datasets/{dataset_id}/documents/{document_id}/tag")
+async def tag_document(
+    dataset_id: str,
+    document_id: str,
+    user: User = Depends(current_user),
+    client: RagflowClient = Depends(get_ragflow),
+) -> dict:
+    """拉取已解析文档 chunks → LLM 抽取标签 → 写回 RAGFlow metadata。
+    解析未完成（无 chunks）→ 409；抽取失败 → 502（宁缺勿错，不写猜测标签）。"""
+    _require_ragflow(client)
+    try:
+        chunks = await client.list_chunks(dataset_id, document_id)
+    except RagflowError as e:
+        raise _map_upstream(e) from e
+    if not chunks:
+        raise HTTPException(status.HTTP_409_CONFLICT, "document not parsed yet (no chunks)")
+    labels = await Tagger().extract(chunks)
+    if labels is None:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "label extraction failed")
+    meta = Tagger.to_meta_fields(labels)
+    try:
+        await client.update_document_meta(dataset_id, document_id, meta)
+    except RagflowError as e:
+        raise _map_upstream(e) from e
+    return {"document_id": document_id, "meta_fields": meta}
+
+
+# ---- 租户绑定管理（PLATFORM_ADMIN） ----
+
+
+@router.get("/bindings", dependencies=[Depends(require_platform_admin)])
+async def list_bindings(
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    rows = (await db.scalars(select(RagflowBinding))).all()
+    return {
+        "bindings": [
+            {
+                "id": b.id,
+                "department_id": b.department_id,
+                "ragflow_email": b.ragflow_email,
+                "default_dataset_id": b.default_dataset_id,
+                "status": b.status,
+            }
+            for b in rows
+        ]
+    }
+
+
+@router.post("/bindings", status_code=201)
+async def create_binding(
+    payload: RagBindingCreate,
+    user: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """全自动开通：注册影子账号→发 key→绑模型→建默认库（见 onboarding.py）。"""
+    dept = await db.get(Department, payload.department_id)
+    if dept is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "department not found")
+    exists = await db.scalar(
+        select(RagflowBinding).where(RagflowBinding.department_id == payload.department_id)
+    )
+    if exists:
+        raise HTTPException(status.HTTP_409_CONFLICT, "binding already exists")
+    email = f"{payload.email_prefix or f'dept-{payload.department_id}'}@ragflow.local"
+    provisioner = RagflowProvisioner()
+    try:
+        api_token, dataset_id, password = await provisioner.provision(email)
+    except ProvisionError as e:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"ragflow provisioning failed: {e}")
+    finally:
+        await provisioner.aclose()
+    binding = RagflowBinding(
+        department_id=payload.department_id,
+        ragflow_email=email,
+        ragflow_password_enc=vault.encrypt(password),
+        ragflow_api_token_enc=vault.encrypt(api_token),
+        default_dataset_id=dataset_id,
+    )
+    db.add(binding)
+    await db.commit()
+    _logger.info(
+        "rag binding created dept=%s email=%s by user=%s",
+        payload.department_id, email, user.id,
+    )
+    return {"department_id": payload.department_id, "default_dataset_id": dataset_id}

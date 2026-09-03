@@ -75,9 +75,19 @@ class Settings(BaseSettings):
     # Dify 服务 API 基址（本切片不真调，测试用 FakeDify；真实联调时指向 .226）
     DIFY_BASE_URL: str = "http://192.168.20.226"
 
-    # RAGFlow 引擎（绞杀者替换 Dify 知识库一侧；单 key 先行，多租户绑定表随 onboarding 切片）
+    # RAGFlow 引擎（绞杀者替换 Dify 知识库一侧；多租户见 ragflow_bindings 表）
     RAGFLOW_BASE_URL: str = "http://192.168.20.226:9380"
-    RAGFLOW_API_KEY: str = ""
+    RAGFLOW_API_KEY: str = ""  # 后备单租户 key（无绑定时网关直接拒，优先 bindings）
+    # RAGFlow 影像内置公钥（公开非机密）：注册/登录密码 RSA 加密用
+    # 优先 RAGFLOW_PUBLIC_KEY（PEM 文本）；RAGFLOW_PUBLIC_KEY_B64 为 base64(PEM) 单行形态（dotenv 兼容）
+    RAGFLOW_PUBLIC_KEY: str = ""
+    RAGFLOW_PUBLIC_KEY_B64: str = ""
+    # 模型策略（测试期外部 API；生产切内部部署时改这三项即可）
+    RAGFLOW_EMBEDDING_MODEL: str = "BAAI/bge-m3"
+    RAGFLOW_RERANK_MODEL: str = "Qwen/Qwen3-Reranker-0.6B"
+    SILICONFLOW_API_KEY: str = ""
+    SILICONFLOW_CHAT_MODEL: str = "Qwen/Qwen2.5-7B-Instruct"
+    SILICONFLOW_BASE_URL: str = "https://api.siliconflow.cn/v1"
 
     SEED_ADMIN_EMAIL: str = "admin@company.com"
     SEED_ADMIN_PASSWORD: str = "admin123"

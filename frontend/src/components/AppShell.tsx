@@ -4,7 +4,7 @@ import {
   FolderOutlined,
   HistoryOutlined,
   LogoutOutlined,
-  MessageOutlined,
+
   UserOutlined,
   UserSwitchOutlined,
 } from "@ant-design/icons";

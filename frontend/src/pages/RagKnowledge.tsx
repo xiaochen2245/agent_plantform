@@ -3,7 +3,7 @@ import {
   Button, Card, Input, List, message, Select, Space, Spin, Tag, Typography, Upload,
 } from "antd";
 import { InboxOutlined, ReloadOutlined, SearchOutlined, TagsOutlined } from "@ant-design/icons";
-import type { UploadFile } from "antd";
+
 import { extractDetail } from "../api/http";
 import { ragApi, type RagDataset, type RagDocument } from "../api/rag";
 

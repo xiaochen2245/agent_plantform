@@ -132,3 +132,79 @@ async def test_scoring_table_api(client: AsyncClient, monkeypatch):
     r = await client.post("/api/compare/scoring-table",
                           json={"dataset_id": "ds-1", "document_id": "doc-1"})
     assert r.status_code == 502
+
+
+# ---- #34 比对流水线：逐项裁决 + 漏判补全 + API ----
+
+
+def _verdicts_json(items):
+    import json as _j
+    return _j.dumps({"verdicts": [
+        {"seq": it["seq"], "item": it["item"], "status": "responded",
+         "deviation": "none", "evidence": "…详见技术方案第3节…", "suggestion": "符合"}
+        for it in items[:-1]  # 故意漏最后一项，测服务端补判
+    ]}, ensure_ascii=False)
+
+
+def test_comparator_join_fills_llm_missed_items():
+    from app.compare.deviation import Comparator
+    from app.compare.schema import ScoringItem, ScoringTable
+
+    table = ScoringTable(total=100, items=[
+        ScoringItem(seq="1", item="报价", score=30),
+        ScoringItem(seq="2", item="技术方案", score=70),
+    ])
+    transport, _ = _llm([_verdicts_json([{"seq": "1", "item": "报价"}, {"seq": "2", "item": "技术方案"}])])
+    result = asyncio.run(Comparator(transport=transport).compare(
+        table, [{"content": "投标文件正文"}]))
+    assert result is not None
+    assert len(result.verdicts) == 2, "LLM 漏判必须由服务端补全，不丢项"
+    assert result.verdicts[1].status == "missing" and "服务端补判" in result.verdicts[1].suggestion
+    assert any("漏判" in w for w in result.warnings)
+
+
+def test_comparator_bad_schema_returns_none():
+    from app.compare.deviation import Comparator
+    from app.compare.schema import ScoringItem, ScoringTable
+    table = ScoringTable(items=[ScoringItem(item="报价", score=1)])
+    transport, _ = _llm(["不是JSON"])
+    assert asyncio.run(Comparator(transport=transport).compare(table, [{"content": "x"}])) is None
+
+
+async def test_deviation_api(client: AsyncClient, monkeypatch):
+    from app.compare.deviation import CompareResult, ItemVerdict
+    from app.compare.router import Comparator as RComparator, ScoringTableExtractor as RExtractor
+    from app.compare.schema import ScoringItem, ScoringTable
+    from app.ragflow.client import RagflowClient
+    from app.ragflow.deps import get_ragflow
+    from app.main import app
+
+    class FakeExtractor:
+        async def extract(self, chunks):
+            return ScoringTable(total=100, items=[ScoringItem(seq="1", item="报价", score=100)])
+
+    class FakeComparator:
+        async def compare(self, table, chunks):
+            return CompareResult(verdicts=[ItemVerdict(
+                seq="1", item="报价", status="responded", deviation="none",
+                evidence="报价一览表", suggestion="符合要求")])
+
+    monkeypatch.setattr("app.compare.router.ScoringTableExtractor", lambda: FakeExtractor())
+    monkeypatch.setattr("app.compare.router.Comparator", lambda: FakeComparator())
+
+    def handler(request):
+        if request.url.path.endswith("/chunks") and request.method == "GET":
+            return httpx.Response(200, json={"code": 0, "data": {"chunks": [{"content": "文本"}]}})
+        return httpx.Response(200, json={"code": 0, "data": []})
+
+    fake = RagflowClient(base_url="http://fake", api_key="k", transport=httpx.MockTransport(handler))
+    app.dependency_overrides[get_ragflow] = lambda: fake
+
+    await login(client)
+    r = await client.post("/api/compare/deviation", json={
+        "scoring": {"dataset_id": "ds-bid", "document_id": "doc-tender"},
+        "response": {"dataset_id": "ds-bid", "document_id": "doc-bid"},
+    })
+    assert r.status_code == 200, r.text
+    v = r.json()["verdicts"][0]
+    assert v["status"] == "responded" and v["suggestion"] == "符合要求"

@@ -15,6 +15,13 @@ class ScoringTableQuery(BaseModel):
     document_id: str = Field(min_length=1, max_length=64)
 
 
+class CompareQuery(BaseModel):
+    """#34 请求体：招标评分表文档 + 投标响应文档（均已解析）。"""
+
+    scoring: ScoringTableQuery
+    response: ScoringTableQuery
+
+
 class ScoringItem(BaseModel):
     seq: str = Field(default="", max_length=32)        # 序号（1 / 1.1 / 一）
     item: str = Field(min_length=1, max_length=256)    # 评分项名称

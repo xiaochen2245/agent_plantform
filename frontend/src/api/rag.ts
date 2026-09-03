@@ -68,3 +68,41 @@ export const ragApi = {
     }),
 };
 export const ragChatUrl = "/api/rag/chat/completions";
+
+/** 解析 RAGFlow OpenAI 兼容 SSE：增量经 onDelta，引用经 onRefs。 */
+export async function streamRagChat(
+  messages: { role: string; content: string }[],
+  handlers: { onDelta: (t: string) => void; onRefs: (r: string[]) => void },
+): Promise<void> {
+  const resp = await fetch(ragChatUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ messages }),
+  });
+  if (!resp.ok || !resp.body) throw new Error(`问答服务异常 (HTTP ${resp.status})`);
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.startsWith("data:")) continue;
+      const payload = line.slice(5).trim();
+      if (!payload || payload === "[DONE]") continue;
+      let j: any;
+      try { j = JSON.parse(payload); } catch { continue; }
+      const delta = j.choices?.[0]?.delta;
+      if (delta?.content) handlers.onDelta(delta.content);
+      const ref = delta?.reference ?? j.choices?.[0]?.message?.reference;
+      if (ref?.chunks) {
+        const list = Array.isArray(ref.chunks) ? ref.chunks : Object.values(ref.chunks);
+        handlers.onRefs(list.map((c: any) => String(c?.content ?? c ?? "").slice(0, 60)));
+      }
+    }
+  }
+}

@@ -45,7 +45,9 @@ def _require_ragflow(client: RagflowClient) -> None:
 
 def _map_upstream(e: RagflowError) -> HTTPException:
     # 越权/不存在 → 404（不泄露他租户资源存在性）；其余 → 502 上游错误
-    if e.status_code in (401, 403) or "don't own" in e.message or "lacks permission" in e.message:
+    if e.status_code in (401, 403) or any(
+        k in e.message for k in ("don't own", "lacks permission", "no authorization")
+    ):
         return HTTPException(status.HTTP_404_NOT_FOUND, "dataset not found")
     return HTTPException(status.HTTP_502_BAD_GATEWAY, f"ragflow upstream: {e.message[:200]}")
 

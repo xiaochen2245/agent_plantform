@@ -256,6 +256,25 @@ class DocumentChunk(Base):
         "DocumentChunk", remote_side=[id], backref="child_chunks"
     )
 
+    @property
+    def is_table_isolated(self) -> bool:
+        """是否为原子隔离的表格切片"""
+        return self.chunk_level == ChunkLevel.TABLE or bool(self.chunk_metadata.get("is_table_isolated", False))
+
+    @property
+    def chunk_id(self) -> str:
+        """兼容 chunk_id 属性访问"""
+        return self.id
+
+    @property
+    def page_or_sheet(self) -> Optional[str]:
+        """兼容页面/工作表名称访问"""
+        if "page_or_sheet" in self.chunk_metadata:
+            return str(self.chunk_metadata["page_or_sheet"])
+        if self.page_number is not None:
+            return str(self.page_number)
+        return None
+
     __table_args__ = (
         Index("idx_chunk_tenant_doc", "tenant_id", "document_id", "chunk_index"),
         Index("idx_chunk_tenant_level", "tenant_id", "chunk_level"),
@@ -392,19 +411,24 @@ class ReviewResult(Base):
 # 6. PostgreSQL 行级安全策略 (Row-Level Security / RLS) DDL 生成脚本
 # ---------------------------------------------------------------------------
 
-def generate_rls_sql() -> str:
+def generate_rls_sql(tables: Optional[List[str]] = None) -> str:
     """
     生成针对 PostgreSQL 16+ 的生产级 RLS 行级安全加固 DDL 脚本
     采用统一设置 Session 级当前租户 app.current_tenant_id 机制
+    核心安全特性:
+    1. ENABLE ROW LEVEL SECURITY: 开启行级安全策略。
+    2. FORCE ROW LEVEL SECURITY: 强制表拥有者 (Table Owner / App DB User) 同样受到 RLS 约束，杜绝越权。
+    3. NULLIF(current_setting('app.current_tenant_id', true), ''): 租户未设置时安全求值为 NULL，禁止返回任何数据。
     """
-    tables = ["documents", "document_chunks", "audit_tasks", "review_results"]
+    target_tables = tables or ["documents", "document_chunks", "audit_tasks", "review_results"]
     ddl_statements = [
         "-- 启用 PostgreSQL 行级安全 (Row-Level Security)",
         "CREATE EXTENSION IF NOT EXISTS vector;",
     ]
-    for tbl in tables:
+    for tbl in target_tables:
         ddl_statements.extend([
             f"ALTER TABLE {tbl} ENABLE ROW LEVEL SECURITY;",
+            f"ALTER TABLE {tbl} FORCE ROW LEVEL SECURITY;",
             f"DROP POLICY IF EXISTS tenant_isolation_policy ON {tbl};",
             f"CREATE POLICY tenant_isolation_policy ON {tbl}",
             f"    FOR ALL",

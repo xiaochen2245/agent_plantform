@@ -5,7 +5,33 @@
 - P2（2026 Q1）= 功能3 全量、扫描件 OCR、长文档一致性全量、功能4 自动关联提醒、细粒度 ACL
 - 顾问会裁决前提：四功能 11-30 全量交付在数学上不可行（48 人月压缩进 12.5 周）；本计划即降级口径
 
-## 已完成（W1，2026-09-03）
+## 进度基线：2026-09-04（协作启动点）
+
+### 已完成（W1-W3 部分，全部已上线生产 8180）
+
+- [x] RAGFlow v0.27.1 生产部署（20.226，租户隔离 4 路实测）+ SiliconFlow embedding/rerank/chat
+- [x] 编排骨架：`backend/app/ragflow/`（client/解析路由槽/deps）+ `/api/rag/*` 网关
+- [x] W2 租户绑定：`ragflow_bindings` 表 + 全自动影子账号开通（7 步零 UI）+ 部门级租户路由
+- [x] W2 功能④打标管道：LLM 结构化抽取 → metadata → 过滤检索（生产实测：11s 打标、专业过滤命中/排空双向正确）
+- [x] W3 门户换脸：四应用首页、知识库应用（全高问答[ChatSurface 组件化，引用来源] + 管理 CRUD）
+- [x] Dify 提前退役（owner 决策）、旧对话/旧 kb 页降级、死数据清理
+- [x] 生产部署流水线跑通（build-ship + remote-up，两条命令）
+- [x] 测试：后端 141、前端 95+（DeptsTab 存量 flake 待修，非本次引入）
+
+### 协作任务分解（GitHub Issues 同步维护，模块所有权隔离冲突）
+
+| Stream | 范围 | 模块所有权（独占文件区） |
+|---|---|---|
+| A: W3 收尾 | 打标自动化/审计日志/ACL 预过滤 | backend/app/ragflow/* |
+| B: 功能① 审查 | OOXML 规则引擎/错别字/审查问答 | backend/app/review/*（新建）、frontend/src/pages/Review* |
+| C: 功能② 比对 | 评分表结构化/比对/金标回归 | backend/app/compare/*（新建）、scripts/golden/* |
+| D: 基础设施 | 部署流水线/升级回归/协作规范 | deploy/*、scripts/*、.github/* |
+| E: 前端通用 | ChatSurface 会话化/多应用复用 | frontend/src/components/* |
+
+冲突约定：`app/main.py`、`app/core/config.py`、`App.tsx` 为共享文件——改动走小 PR，由 Stream D 合并；跨 Stream 接口先开 issue 对齐。
+
+---
+## 原始周计划（W1 起，存档）
 
 - [x] RAGFlow v0.27.1 部署（20.226，与 Dify 共存，内存帽调优）+ 4G swap
 - [x] 租户隔离验证（4 路越权全拒）、SiliconFlow embedding+rerank 接入（租户 C）

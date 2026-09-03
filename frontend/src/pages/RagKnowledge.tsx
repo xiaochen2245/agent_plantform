@@ -7,7 +7,7 @@ import {
 } from "@ant-design/icons";
 import { extractDetail } from "../api/http";
 import ChatSurface, { type ChatTurn } from "../components/ChatSurface";
-import { ragApi, streamRagChat, type RagDataset, type RagDocument } from "../api/rag";
+import { ragApi, ragSessions, streamRagChat, type RagChatSession, type RagDataset, type RagDocument } from "../api/rag";
 
 const RUN_TAG: Record<string, { color: string; text: string }> = {
   UNSTART: { color: "default", text: "待解析" },
@@ -17,8 +17,46 @@ const RUN_TAG: Record<string, { color: string; text: string }> = {
   CANCEL: { color: "warning", text: "已取消" },
 };
 
-/** 知识库应用：问答（核心，全高对话布局）+ 管理。 */
+/** 知识库应用：问答（核心，全高对话布局，会话持久化 #38）+ 管理。 */
 export default function RagKnowledge() {
+  const [sessions, setSessions] = useState<RagChatSession[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);  // null = 新会话（首条消息时创建）
+  const sidRef = useRef<string | null>(null);
+  sidRef.current = activeId;
+
+  const refreshSessions = useCallback(async () => {
+    try {
+      const { data } = await ragSessions.list();
+      setSessions(data.sessions ?? []);
+    } catch { /* 会话列表失败降级：聊天仍可用 */ }
+  }, []);
+
+  useEffect(() => { void refreshSessions(); }, [refreshSessions]);
+
+  const persistence = {
+    load: async (): Promise<ChatTurn[]> => {
+      const sid = sidRef.current;
+      if (!sid) return [];
+      const { data } = await ragSessions.messages(sid);
+      return (data.messages ?? []).map(({ role, content }) => ({ role, content }));
+    },
+    save: async (turns: ChatTurn[]) => {
+      let sid = sidRef.current;
+      if (!sid) {
+        const first = turns.find((t) => t.role === "user");
+        const { data } = await ragSessions.create(first ? first.content.slice(0, 30) : "新会话");
+        sid = data.id;
+        sidRef.current = sid;
+        setActiveId(sid);
+      }
+      await ragSessions.sync(
+        sid,
+        turns.map(({ role, content }) => ({ role: role as "user" | "assistant", content })),
+      );
+      void refreshSessions();
+    },
+  };
+
   return (
     <Tabs
       defaultActiveKey="chat"
@@ -27,15 +65,33 @@ export default function RagKnowledge() {
           key: "chat",
           label: "问答",
           children: (
-            <ChatSurface
-              title="知识库问答"
-              description="基于本部门知识库，回答附引用来源"
-              placeholder="向本部门知识库提问，例如：管道埋深有哪些历史审查问题？"
-              streamAnswer={async (query, history: ChatTurn[], handlers) => {
-                const msgs = [...history, { role: "user", content: query }].map(({ role, content }) => ({ role, content }));
-                await streamRagChat(msgs, handlers);
-              }}
-            />
+            <div className="chat-main" style={{ display: "block" }}>
+              <Space style={{ padding: "8px 16px 0", width: "100%", justifyContent: "flex-end" }}>
+                <Select
+                  size="small"
+                  style={{ minWidth: 200 }}
+                  placeholder="新会话"
+                  value={activeId ?? undefined}
+                  onChange={(v) => setActiveId(v)}
+                  options={sessions.map((s) => ({
+                    value: s.id,
+                    label: `${s.title}（${s.message_count}条）`,
+                  }))}
+                />
+                <Button size="small" icon={<PlusOutlined />} onClick={() => setActiveId(null)}>新会话</Button>
+              </Space>
+              <ChatSurface
+                key={activeId ?? "new"}
+                title="知识库问答"
+                description="基于本部门知识库，回答附引用来源"
+                placeholder="向本部门知识库提问，例如：管道埋深有哪些历史审查问题？"
+                persistence={persistence}
+                streamAnswer={async (query, history: ChatTurn[], handlers) => {
+                  const msgs = [...history, { role: "user", content: query }].map(({ role, content }) => ({ role, content }));
+                  await streamRagChat(msgs, handlers);
+                }}
+              />
+            </div>
           ),
         },
         { key: "manage", label: "管理", children: <RagManage /> },

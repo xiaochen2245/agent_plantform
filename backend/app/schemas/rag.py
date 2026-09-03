@@ -30,3 +30,20 @@ class RagRetrievalQuery(BaseModel):
 class RagBindingCreate(BaseModel):
     department_id: int
     email_prefix: str = Field(default="", max_length=64)  # 缺省 dept-<id>@ragflow.local
+
+
+class RagSessionCreate(BaseModel):
+    """#38 会话创建：app_id 关联门户应用（1=知识库 2=审查 3=比对），缺省知识库。"""
+    app_id: int = 1
+    title: str = Field(default="", max_length=200)
+
+
+class RagSessionMessage(BaseModel):
+    role: str = Field(pattern="^(user|assistant)$")
+    content: str = Field(min_length=1, max_length=16384)
+
+
+class RagSessionSync(BaseModel):
+    """全量同步：客户端上报当前会话完整轮次（幂等重写）。"""
+    messages: list[RagSessionMessage] = Field(max_length=200)
+    title: str | None = Field(default=None, max_length=200)

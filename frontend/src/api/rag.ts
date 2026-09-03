@@ -106,3 +106,30 @@ export async function streamRagChat(
     }
   }
 }
+
+export interface RagChatSession {
+  id: string;
+  title: string;
+  message_count: number;
+  updated_at: string;
+}
+
+export interface RagSessionMessage {
+  role: "user" | "assistant";
+  content: string;
+  created_at?: string;
+}
+
+/** #38 会话持久化：ChatSurface 多轮不丢，审查/比对应用同接口复用。 */
+export const ragSessions = {
+  list: () => http.get<{ sessions: RagChatSession[] }>("/rag/chat/sessions"),
+  create: (title: string) => http.post<{ id: string; title: string }>("/rag/chat/sessions", { title }),
+  messages: (id: string) =>
+    http.get<{ messages: RagSessionMessage[] }>(`/rag/chat/sessions/${id}/messages`),
+  sync: (id: string, messages: { role: "user" | "assistant"; content: string }[], title?: string) =>
+    http.put<{ id: string; message_count: number }>(`/rag/chat/sessions/${id}/messages`, {
+      messages,
+      ...(title ? { title } : {}),
+    }),
+  remove: (id: string) => http.delete(`/rag/chat/sessions/${id}`),
+};

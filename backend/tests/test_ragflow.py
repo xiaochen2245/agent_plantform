@@ -464,3 +464,61 @@ async def test_autotag_writes_audit(monkeypatch):
         row = await s.scalar(select(RagAuditLog).where(RagAuditLog.action == "doc.tag"))
     assert row is not None and row.user_id == 7
     assert "autotag" in (row.detail or "")
+
+
+# ---- #38 会话持久化：创建/列表/读消息/全量同步/软删 + 越权隔离 ----
+
+
+async def test_chat_session_lifecycle(client: AsyncClient):
+    await login(client)
+    r = await client.post("/api/rag/chat/sessions", json={"title": ""})
+    assert r.status_code == 201, r.text
+    sid = r.json()["id"]
+
+    # 全量同步两轮
+    turns = [
+        {"role": "user", "content": "管道埋深要求？"},
+        {"role": "assistant", "content": "需考虑冻土线。"},
+    ]
+    r = await client.put(f"/api/rag/chat/sessions/{sid}/messages",
+                         json={"messages": turns, "title": "管道问题"})
+    assert r.status_code == 200 and r.json()["message_count"] == 2
+
+    # 再同步一轮（幂等重写而非追加）
+    turns.append({"role": "user", "content": "依据哪份审查单？"})
+    r = await client.put(f"/api/rag/chat/sessions/{sid}/messages",
+                         json={"messages": turns, "title": "管道问题"})
+    assert r.json()["message_count"] == 3
+
+    r = await client.get(f"/api/rag/chat/sessions/{sid}/messages")
+    assert [m["content"] for m in r.json()["messages"]] == [t["content"] for t in turns]
+
+    r = await client.get("/api/rag/chat/sessions")
+    assert r.status_code == 200
+    s = r.json()["sessions"][0]
+    assert s["title"] == "管道问题" and s["message_count"] == 3
+
+    # 软删后不可见不可读
+    r = await client.delete(f"/api/rag/chat/sessions/{sid}")
+    assert r.status_code == 204
+    assert (await client.get("/api/rag/chat/sessions")).json()["sessions"] == []
+    assert (await client.get(f"/api/rag/chat/sessions/{sid}/messages")).status_code == 404
+
+
+async def test_chat_session_isolation_and_validation(client: AsyncClient):
+    await login(client)  # admin 建
+    sid = (await client.post("/api/rag/chat/sessions", json={})).json()["id"]
+
+    await mkuser("peer@company.com", role_codes=("USER",))
+    await login(client, email="peer@company.com", password="guest-pass-123")
+    assert (await client.get(f"/api/rag/chat/sessions/{sid}/messages")).status_code == 404
+    assert (await client.put(f"/api/rag/chat/sessions/{sid}/messages",
+                             json={"messages": [{"role": "user", "content": "x"}]})).status_code == 404
+
+    # 非法 app_id / 坏 uuid / 坏 role
+    assert (await client.post("/api/rag/chat/sessions", json={"app_id": 999})).status_code == 404
+    assert (await client.get("/api/rag/chat/sessions/not-a-uuid/messages")).status_code == 404
+    r = await client.post("/api/rag/chat/sessions", json={})
+    sid2 = r.json()["id"]
+    assert (await client.put(f"/api/rag/chat/sessions/{sid2}/messages",
+                             json={"messages": [{"role": "system", "content": "x"}]})).status_code == 422

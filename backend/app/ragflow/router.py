@@ -18,6 +18,7 @@ from app.db.session import get_db
 from app.models.department import Department
 from app.models.ragflow_binding import RagflowBinding
 from app.models.user import User
+from app.ragflow.autotag import spawn_autotag
 from app.ragflow.client import RagflowClient, RagflowError
 from app.ragflow.deps import get_ragflow
 from app.ragflow.parsing import route_for
@@ -111,6 +112,8 @@ async def upload_documents(
         await client.trigger_parse(dataset_id, [d["id"] for d in docs])
     except RagflowError as e:
         raise _map_upstream(e) from e
+    # 解析为异步：后台轮询 run=DONE 自动打标（失败仅记日志，按钮兜底重试）
+    spawn_autotag(client, dataset_id, [d["id"] for d in docs])
     return {
         "accepted": [
             {"id": d.get("id"), "name": d.get("name"), "run": d.get("run")} for d in docs

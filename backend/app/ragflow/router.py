@@ -4,9 +4,10 @@
 = PLATFORM_ADMIN。租户映射当前为单 key（RAGFLOW_API_KEY），多租户绑定表
 随 onboarding 切片落地；届时此路由按登录用户解析 per-tenant key。
 """
+import json
 import logging
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -16,6 +17,7 @@ from app.auth.deps import current_user, require_platform_admin
 from app.core import vault
 from app.db.session import get_db
 from app.models.department import Department
+from app.models.rag_audit import RagAuditLog
 from app.models.ragflow_binding import RagflowBinding
 from app.models.user import User
 from app.ragflow.autotag import spawn_autotag
@@ -36,6 +38,20 @@ router = APIRouter(prefix="/api/rag", tags=["rag"])
 _logger = logging.getLogger("app.ragflow")
 
 MAX_RAG_UPLOAD_BYTES = 50 * 1024 * 1024  # 50MB/文件（评分表/审查单体量级）
+
+
+def _audit(
+    db: AsyncSession, user: User, action: str, dataset_id: str | None = None, **detail
+) -> None:
+    """写操作审计（#28）：随请求事务提交（kb 路由契约 v9 同模式）。"""
+    db.add(
+        RagAuditLog(
+            user_id=user.id,
+            action=action,
+            dataset_id=dataset_id,
+            detail=json.dumps(detail, ensure_ascii=False) if detail else None,
+        )
+    )
 
 
 def _require_ragflow(client: RagflowClient) -> None:
@@ -79,6 +95,7 @@ async def create_dataset(
         data = await client.create_dataset(payload.name, payload.description)
     except RagflowError as e:
         raise _map_upstream(e) from e
+    _audit(db, user, "dataset.create", data.get("id"), name=payload.name)
     return {"id": data.get("id"), "name": payload.name}
 
 
@@ -113,7 +130,8 @@ async def upload_documents(
     except RagflowError as e:
         raise _map_upstream(e) from e
     # 解析为异步：后台轮询 run=DONE 自动打标（失败仅记日志，按钮兜底重试）
-    spawn_autotag(client, dataset_id, [d["id"] for d in docs])
+    spawn_autotag(client, dataset_id, [d["id"] for d in docs], user_id=user.id)
+    _audit(db, user, "doc.upload", dataset_id, files=[d.get("name") for d in docs])
     return {
         "accepted": [
             {"id": d.get("id"), "name": d.get("name"), "run": d.get("run")} for d in docs
@@ -177,6 +195,7 @@ async def tag_document(
     dataset_id: str,
     document_id: str,
     user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
     client: RagflowClient = Depends(get_ragflow),
 ) -> dict:
     """拉取已解析文档 chunks → LLM 抽取标签 → 写回 RAGFlow metadata。
@@ -196,6 +215,7 @@ async def tag_document(
         await client.update_document_meta(dataset_id, document_id, meta)
     except RagflowError as e:
         raise _map_upstream(e) from e
+    _audit(db, user, "doc.tag", dataset_id, document_id=document_id, source="manual")
     return {"document_id": document_id, "meta_fields": meta}
 
 
@@ -252,6 +272,7 @@ async def chat_completions(
 async def delete_dataset(
     dataset_id: str,
     user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
     client: RagflowClient = Depends(get_ragflow),
 ) -> None:
     _require_ragflow(client)
@@ -259,6 +280,7 @@ async def delete_dataset(
         await client.delete_dataset(dataset_id)
     except RagflowError as e:
         raise _map_upstream(e) from e
+    _audit(db, user, "dataset.delete", dataset_id)
 
 
 class RagDatasetUpdate(BaseModel):
@@ -271,6 +293,7 @@ async def update_dataset(
     dataset_id: str,
     payload: RagDatasetUpdate,
     user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
     client: RagflowClient = Depends(get_ragflow),
 ) -> dict:
     _require_ragflow(client)
@@ -278,6 +301,10 @@ async def update_dataset(
         await client.update_dataset(dataset_id, payload.name, payload.description)
     except RagflowError as e:
         raise _map_upstream(e) from e
+    _audit(
+        db, user, "dataset.update", dataset_id,
+        **{"name": payload.name, "description": payload.description},
+    )
     return {"id": dataset_id}
 
 
@@ -290,6 +317,7 @@ async def delete_documents(
     dataset_id: str,
     payload: RagDocDelete,
     user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
     client: RagflowClient = Depends(get_ragflow),
 ) -> None:
     _require_ragflow(client)
@@ -297,6 +325,40 @@ async def delete_documents(
         await client.delete_documents(dataset_id, payload.ids)
     except RagflowError as e:
         raise _map_upstream(e) from e
+    _audit(db, user, "doc.delete", dataset_id, ids=payload.ids)
+
+
+# ---- 审计查询（#28：按用户+时间追溯） ----
+
+
+@router.get("/audit", dependencies=[Depends(require_platform_admin)])
+async def list_audit(
+    user_id: int | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    q = (
+        select(RagAuditLog, User.name)
+        .outerjoin(User, User.id == RagAuditLog.user_id)
+        .order_by(RagAuditLog.id.desc())
+        .limit(limit)
+    )
+    if user_id is not None:
+        q = q.where(RagAuditLog.user_id == user_id)
+    rows = (await db.execute(q)).all()
+    return {
+        "logs": [
+            {
+                "user_id": log.user_id,
+                "user_name": name,
+                "action": log.action,
+                "dataset_id": log.dataset_id,
+                "detail": log.detail,
+                "created_at": log.created_at.isoformat(),
+            }
+            for log, name in rows
+        ]
+    }
 
 
 # ---- 租户绑定管理（PLATFORM_ADMIN） ----
@@ -353,6 +415,7 @@ async def create_binding(
     )
     db.add(binding)
     await db.commit()
+    _audit(db, user, "binding.create", dataset_id, department_id=payload.department_id, email=email)
     _logger.info(
         "rag binding created dept=%s email=%s by user=%s",
         payload.department_id, email, user.id,

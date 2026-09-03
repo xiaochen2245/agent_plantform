@@ -6,6 +6,21 @@
 - 顾问会裁决前提：四功能 11-30 全量交付在数学上不可行（48 人月压缩进 12.5 周）；本计划即降级口径
 
 ## 进度基线：2026-09-04（协作启动点）
+### 2026-09-05 会话增量（AI agent abcdqwerxsa，全部合入 develop）
+
+- [x] #27 打标自动化：后端轮询 autotag（fire-and-forget，按钮兜底重试）
+- [x] #28 RAG 写操作审计：rag_audit_logs + 7 写端点 + admin 查询 API
+- [x] #30 功能① OOXML 规则引擎：stdlib 解析 + R1-R4 确定性规则（backend/app/review/）
+- [x] #31 功能① 错别字 LLM 通道：72B 候选+置信度，不自动改
+- [x] #32 功能① 审查应用页：/apps/review 双上传→报告→报告问答
+- [x] #36 升级回归脚本入库：scripts/ragflow-regress.py 5 项（假引擎冒烟通过）
+- [x] #38 ChatSurface 会话化：/api/rag/chat/sessions + persistence prop
+- [x] #33 功能② 评分表结构化拆解：ScoringTable + 校验重试（+共享 llm.chat_json 底座）
+- [x] #34 功能② 比对流水线：逐项裁决+漏判补全，偏离仅建议
+- 测试：后端 168、前端 99（DeptsTab 存量 flake 未动）；共享文件改动均按 COLLAB 报备
+- 卡点不变：#29/#35 owner 待决、#37 待协作方补充
+
+
 
 ### 已完成（W1-W3 部分，全部已上线生产 8180）
 

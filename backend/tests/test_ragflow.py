@@ -104,8 +104,9 @@ async def test_create_dataset_needs_binding(client: AsyncClient):
     assert r.status_code == 503
 
 
-async def test_create_dataset_and_upload_flow(client: AsyncClient):
+async def test_create_dataset_and_upload_flow(client: AsyncClient, monkeypatch):
     captured: list = []
+    monkeypatch.setattr("app.ragflow.router.spawn_autotag", lambda *a: None)  # 后台轮询单测另测
     _override(fake_ragflow(captured))
     await login(client)  # admin
     r = await client.post("/api/rag/datasets", json={"name": "评分表库"})
@@ -332,3 +333,69 @@ async def test_dataset_crud_endpoints(client: AsyncClient):
     r = await client.request("DELETE", "/api/rag/datasets/ds-1/documents", json={"ids": ["d1"]})
     assert r.status_code == 204
     assert any(c["method"] == "DELETE" and c["url"].endswith("/datasets/ds-1/documents") for c in captured)
+
+
+# ---- #27 自动打标：上传后轮询 DONE 自动写 metadata ----
+
+
+async def test_upload_spawns_autotag(client: AsyncClient, monkeypatch):
+    spawned: list = []
+    monkeypatch.setattr("app.ragflow.router.spawn_autotag",
+                        lambda c, ds, ids: spawned.append((ds, ids)))
+    _override(fake_ragflow())
+    await login(client)
+    r = await client.post(
+        "/api/rag/datasets/ds-1/documents",
+        files={"files": ("评分表.docx", b"fake-docx-bytes",
+                         "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+    )
+    assert r.status_code == 202, r.text
+    assert spawned == [("ds-1", ["doc-1"])], "upload must schedule autotag for each doc"
+
+
+class _AutotagFake:
+    """直接喂 tag_when_done 的最小假身：run 可控，调用可追。"""
+
+    def __init__(self, run: str):
+        self.run = run
+        self.calls: list[str] = []
+
+    async def list_documents(self, dataset_id: str, page: int = 1) -> list[dict]:
+        self.calls.append("list")
+        return [{"id": "d1", "run": self.run}] if page == 1 else []
+
+    async def list_chunks(self, dataset_id: str, document_id: str, **k) -> list[dict]:
+        self.calls.append("chunks")
+        return [{"content": "审查意见：管道埋深未考虑冻土线"}]
+
+    async def update_document_meta(self, dataset_id: str, document_id: str, meta: dict) -> None:
+        self.calls.append(("meta", meta))
+
+
+async def test_tag_when_done_writes_meta(monkeypatch):
+    from app.ragflow import autotag
+
+    class FakeTagger(Tagger):
+        async def extract(self, chunks):
+            return ExtractedLabels(project="XX管网改造", discipline="给排水")
+
+    monkeypatch.setattr(autotag, "Tagger", FakeTagger)
+    fake = _AutotagFake("DONE")
+    await autotag.tag_when_done(fake, "ds-1", "d1")
+    metas = [c for c in fake.calls if isinstance(c, tuple)]
+    assert metas and metas[0][1]["project"] == "XX管网改造"
+
+
+async def test_tag_when_done_fail_and_timeout(monkeypatch):
+    from app.ragflow import autotag
+
+    # 解析失败 → 放弃，不拉 chunks 不写 meta
+    fake = _AutotagFake("FAIL")
+    await autotag.tag_when_done(fake, "ds-1", "d1")
+    assert fake.calls == ["list"]
+
+    # 一直 RUNNING + 超时 0 → 立即放弃
+    fake = _AutotagFake("RUNNING")
+    monkeypatch.setattr(autotag, "POLL_TIMEOUT", 0)
+    await autotag.tag_when_done(fake, "ds-1", "d1")
+    assert fake.calls == ["list"]

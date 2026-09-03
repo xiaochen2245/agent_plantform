@@ -87,6 +87,7 @@ class Settings(BaseSettings):
     RAGFLOW_RERANK_MODEL: str = "Qwen/Qwen3-Reranker-0.6B"
     SILICONFLOW_API_KEY: str = ""
     SILICONFLOW_CHAT_MODEL: str = "Qwen/Qwen2.5-7B-Instruct"
+    SILICONFLOW_TYPO_MODEL: str = "Qwen/Qwen2.5-72B-Instruct"  # #31 错别字通道（issue 指定 72B）
     SILICONFLOW_BASE_URL: str = "https://api.siliconflow.cn/v1"
 
     SEED_ADMIN_EMAIL: str = "admin@company.com"

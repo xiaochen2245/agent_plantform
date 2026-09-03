@@ -162,3 +162,66 @@ async def test_review_api(client: AsyncClient):
                ("template", ("t.docx", b"", "application/octet-stream"))],
     )
     assert r.status_code == 422
+
+
+# ---- #31 错别字 LLM 辅助通道 ----
+
+
+def test_typo_checker_parses_llm_json():
+    """假 transport 回放 LLM JSON → 候选清单；markdown 围栏剥除。"""
+    import httpx
+    from app.review.typo import TypoChecker
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"choices": [{"message": {"content":
+            '```json\n{"typos": [{"orig": "按装", "suggestion": "安装", '
+            '"confidence": 0.92, "paragraph": 2, "context": "设备按装完毕"}]}\n```'
+        }}]})
+
+    import asyncio
+    checker = TypoChecker(transport=httpx.MockTransport(handler))
+    out = asyncio.run(checker.check([(0, "标题"), (2, "设备按装完毕，管线已验收。")]))
+    assert out and out[0].orig == "按装" and out[0].confidence == 0.92
+    assert out[0].paragraph == 2
+
+
+def test_typo_checker_bad_json_returns_none():
+    import asyncio
+    import httpx
+    from app.review.typo import TypoChecker
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"choices": [{"message": {"content": "我不会输出 JSON"}}]})
+
+    out = asyncio.run(TypoChecker(transport=httpx.MockTransport(handler)).check([(0, "文本")]))
+    assert out is None
+
+
+def test_typo_checker_empty_input_returns_empty():
+    import asyncio
+    from app.review.typo import TypoChecker
+    assert asyncio.run(TypoChecker().check([])) == []
+
+
+async def test_typos_api(client: AsyncClient, monkeypatch):
+    from app.review.router import TypoChecker as RouterChecker
+    from app.review.typo import TypoCandidate
+
+    class FakeChecker:
+        async def check(self, paragraphs):
+            assert paragraphs == [(0, "设备按装完毕。")]
+            return [TypoCandidate(orig="按装", suggestion="安装", confidence=0.9,
+                                  paragraph=0, context="设备按装完毕。")]
+
+    monkeypatch.setattr("app.review.router.TypoChecker", FakeChecker)
+    await login(client)
+    doc = build_docx([_p(_r("设备按装完毕。"))])
+    r = await client.post("/api/review/typos", files=[
+        ("file", ("审查.docx", doc, "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))])
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["typos"][0]["suggestion"] == "安装" and body["typos"][0]["paragraph"] == 0
+
+    r = await client.post("/api/review/typos", files=[
+        ("file", ("坏.txt", b"junk", "text/plain"))])
+    assert r.status_code == 422

@@ -75,6 +75,10 @@ class Settings(BaseSettings):
     # Dify 服务 API 基址（本切片不真调，测试用 FakeDify；真实联调时指向 .226）
     DIFY_BASE_URL: str = "http://192.168.20.226"
 
+    # RAGFlow 引擎（绞杀者替换 Dify 知识库一侧；单 key 先行，多租户绑定表随 onboarding 切片）
+    RAGFLOW_BASE_URL: str = "http://192.168.20.226:9380"
+    RAGFLOW_API_KEY: str = ""
+
     SEED_ADMIN_EMAIL: str = "admin@company.com"
     SEED_ADMIN_PASSWORD: str = "admin123"
 

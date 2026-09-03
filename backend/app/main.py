@@ -24,6 +24,8 @@ from app.dify.client import DifyClient, app_api_key
 from app.files.cleanup import sweep_expired_uploads
 from app.files.router import router as files_router
 from app.kb.router import router as kb_router
+from app.ragflow.client import RagflowClient
+from app.ragflow.router import router as rag_router
 from app.models.app import App
 
 _logger = logging.getLogger("app.main")
@@ -58,12 +60,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # B5：上传 TTL 清理（fire-and-forget；持有引用防 GC）
     app.state.upload_sweep_task = asyncio.create_task(sweep_expired_uploads())
     app.state.dify = DifyClient()  # 进程级单例（设计 §13.1）
+    app.state.ragflow = RagflowClient()  # RAGFlow 引擎单例（同上）
     try:
         yield
     finally:
         with contextlib.suppress(Exception):
             app.state.upload_sweep_task.cancel()
         await app.state.dify.aclose()
+        await app.state.ragflow.aclose()
         await dispose_engine()
 
 
@@ -86,6 +90,7 @@ app.include_router(apps_router)
 app.include_router(chat_router)
 app.include_router(files_router)
 app.include_router(kb_router)
+app.include_router(rag_router)
 app.include_router(conversations_router)
 app.include_router(depts_router)
 app.include_router(roles_router)

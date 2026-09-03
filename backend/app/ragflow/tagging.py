@@ -1,17 +1,18 @@
 """功能④打标管道：入库文档 → LLM 抽取业务标签 → RAGFlow document metadata。
 
-- LLM：SiliconFlow chat（OpenAI 兼容），网关直连，key 不落 RAGFlow
+- LLM：SiliconFlow chat（OpenAI 兼容），网关直连，key 不落 RAGFlow（共享底座
+  app/core/llm.chat_json）
 - 输出 schema 用 pydantic 校验；LLM 返回不合规则打标失败（宁缺勿错——
   错误标签会让元数据过滤检索静默失真）
 - meta_fields 落 RAGFlow 后，retrieval 的 metadata_condition 直接可过滤
 """
-import json
 import logging
 
 import httpx
 from pydantic import BaseModel, Field, ValidationError
 
 from app.core.config import settings
+from app.core.llm import chat_json
 
 _logger = logging.getLogger("app.ragflow.tagging")
 
@@ -24,7 +25,6 @@ class ExtractedLabels(BaseModel):
     doc_type: str = Field(default="", max_length=64)      # 文档类型（设计审查单/经验反馈/里程碑…）
     date: str = Field(default="", max_length=32)          # 文档所属时间 YYYY 或 YYYY-MM
     keywords: list[str] = Field(default_factory=list, max_length=10)
-
 
 PROMPT = """你是工程文档编目员。从下面的文档内容中抽取结构化标签，只输出 JSON 对象，不要任何其他文字。
 字段：
@@ -42,31 +42,6 @@ class Tagger:
     def __init__(self, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self._transport = transport
 
-    async def _chat(self, content: str) -> str:
-        body = {
-            "model": settings.SILICONFLOW_CHAT_MODEL,
-            "messages": [
-                {"role": "system", "content": "你只输出 JSON。"},
-                {"role": "user", "content": PROMPT.format(content=content)},
-            ],
-            "temperature": 0.1,
-            "max_tokens": 512,
-            "response_format": {"type": "json_object"},
-        }
-        async with httpx.AsyncClient(
-            base_url=settings.SILICONFLOW_BASE_URL.rstrip("/"),
-            timeout=httpx.Timeout(120.0, connect=10.0),
-            transport=self._transport,
-            trust_env=False,
-        ) as c:
-            r = await c.post(
-                "/chat/completions",
-                json=body,
-                headers={"Authorization": f"Bearer {settings.SILICONFLOW_API_KEY}"},
-            )
-            r.raise_for_status()
-            return r.json()["choices"][0]["message"]["content"]
-
     async def extract(self, chunks: list[dict]) -> ExtractedLabels | None:
         """chunks → 标签；抽取/解析失败返回 None（调用方决定重试或人补）。"""
         text = "\n".join(
@@ -75,23 +50,17 @@ class Tagger:
         ).strip()
         if not text:
             return None
-        try:
-            raw = await self._chat(text[:8000])
-        except httpx.HTTPError as e:
-            _logger.warning("tagging llm error: %s", e)
-            return None
-        raw = raw.strip()
-        if raw.startswith("```"):
-            raw = raw.strip("`").removeprefix("json").strip()
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            _logger.warning("tagging llm non-json: %.200s", raw)
+        data = await chat_json(
+            PROMPT.format(content=text[:8000]),
+            model=settings.SILICONFLOW_CHAT_MODEL,
+            transport=self._transport,
+        )
+        if data is None:
             return None
         try:
             return ExtractedLabels(**data)
         except ValidationError:
-            _logger.warning("tagging schema mismatch: %.200s", raw)
+            _logger.warning("tagging schema mismatch: %.200s", data)
             return None
 
     @staticmethod

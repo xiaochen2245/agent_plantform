@@ -1,16 +1,16 @@
 """功能① 错别字 LLM 辅助通道（#31）：候选+置信度，不做自动改。
 
-调用模式与 app/ragflow/tagging.py 同款（SiliconFlow OpenAI 兼容 + JSON 输出
-+ pydantic 校验，失败宁缺勿错）。与规则引擎（#30）互补：规则查格式确定性
-问题，这里查语义性错别字，人审决定改不改。
+调用模式与 app/ragflow/tagging.py 同款（共享底座 app/core/llm.chat_json）。
+与规则引擎（#30）互补：规则查格式确定性问题，这里查语义性错别字，
+人审决定改不改。
 """
-import json
 import logging
 
 import httpx
 from pydantic import BaseModel, Field, ValidationError
 
 from app.core.config import settings
+from app.core.llm import chat_json
 
 _logger = logging.getLogger("app.ragflow.typo")
 
@@ -41,46 +41,21 @@ class TypoChecker:
     def __init__(self, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self._transport = transport
 
-    async def _chat(self, content: str) -> str:
-        body = {
-            "model": settings.SILICONFLOW_TYPO_MODEL,
-            "messages": [
-                {"role": "system", "content": "你只输出 JSON。"},
-                {"role": "user", "content": PROMPT.format(content=content)},
-            ],
-            "temperature": 0.1,
-            "max_tokens": 2048,
-            "response_format": {"type": "json_object"},
-        }
-        async with httpx.AsyncClient(
-            base_url=settings.SILICONFLOW_BASE_URL.rstrip("/"),
-            timeout=httpx.Timeout(120.0, connect=10.0),
-            transport=self._transport,
-            trust_env=False,
-        ) as c:
-            r = await c.post(
-                "/chat/completions",
-                json=body,
-                headers={"Authorization": f"Bearer {settings.SILICONFLOW_API_KEY}"},
-            )
-            r.raise_for_status()
-            return r.json()["choices"][0]["message"]["content"]
-
     async def check(self, paragraphs: list[tuple[int, str]]) -> list[TypoCandidate] | None:
         """[(段落序号, 文本)] → 候选清单；LLM/解析失败返回 None（调用方 502 或重试）。"""
         text = "\n".join(f"[P{idx}] {t}" for idx, t in paragraphs if t.strip())[:MAX_INPUT_CHARS]
         if not text:
             return []
-        try:
-            raw = (await self._chat(text)).strip()
-        except httpx.HTTPError as e:
-            _logger.warning("typo llm error: %s", e)
+        data = await chat_json(
+            PROMPT.format(content=text),
+            model=settings.SILICONFLOW_TYPO_MODEL,
+            max_tokens=2048,
+            transport=self._transport,
+        )
+        if data is None:
             return None
-        if raw.startswith("```"):
-            raw = raw.strip("`").removeprefix("json").strip()
         try:
-            data = json.loads(raw)
             return [TypoCandidate(**t) for t in data.get("typos", [])]
-        except (json.JSONDecodeError, ValidationError, TypeError):
-            _logger.warning("typo non-json/schema mismatch: %.200s", raw)
+        except (ValidationError, TypeError):
+            _logger.warning("typo schema mismatch: %.200s", data)
             return None

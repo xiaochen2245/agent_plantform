@@ -6,17 +6,22 @@
 """
 import json
 import logging
+import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import current_user, require_platform_admin
 from app.core import vault
 from app.db.session import get_db
 from app.models.department import Department
+from app.models.app import App
+from app.models.conversation import Conversation
+from app.models.message import Message
 from app.models.rag_audit import RagAuditLog
 from app.models.ragflow_binding import RagflowBinding
 from app.models.user import User
@@ -31,6 +36,8 @@ from app.schemas.rag import (
     RagBindingCreate,
     RagDatasetCreate,
     RagRetrievalQuery,
+    RagSessionCreate,
+    RagSessionSync,
 )
 
 router = APIRouter(prefix="/api/rag", tags=["rag"])
@@ -359,6 +366,124 @@ async def list_audit(
             for log, name in rows
         ]
     }
+
+
+# ---- 会话持久化（#38：ChatSurface 多轮不丢，审查/比对应用同接口复用） ----
+
+
+@router.post("/chat/sessions", status_code=201)
+async def create_chat_session(
+    payload: RagSessionCreate,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """新建会话（复用 Conversation 表；app_id 关联门户应用，缺省知识库 app=1）。"""
+    app = await db.get(App, payload.app_id)
+    if app is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "app not found")
+    conv = Conversation(user_id=user.id, app_id=payload.app_id, title=payload.title or "")
+    db.add(conv)
+    await db.commit()
+    return {"id": str(conv.id), "title": conv.title}
+
+
+@router.get("/chat/sessions")
+async def list_chat_sessions(
+    app_id: int = 1,
+    limit: int = 20,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    q = (
+        select(Conversation)
+        .where(
+            Conversation.user_id == user.id,
+            Conversation.deleted_at.is_(None),
+            Conversation.app_id == app_id,
+        )
+        .order_by(Conversation.updated_at.desc())
+        .limit(max(1, min(limit, 100)))
+    )
+    rows = (await db.scalars(q)).all()
+    return {
+        "sessions": [
+            {
+                "id": str(r.id),
+                "title": r.title or "新会话",
+                "message_count": r.message_count or 0,
+                "updated_at": r.updated_at.isoformat(),
+            }
+            for r in rows
+        ]
+    }
+
+
+async def _own_session(db: AsyncSession, user: User, session_id: str) -> Conversation:
+    """仅本人会话；不足 uuid/不存在/他人 → 404（不泄露存在性）。"""
+    try:
+        sid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "session not found")
+    conv = await db.get(Conversation, sid)
+    if conv is None or conv.user_id != user.id or conv.deleted_at is not None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "session not found")
+    return conv
+
+
+@router.get("/chat/sessions/{session_id}/messages")
+async def chat_session_messages(
+    session_id: str,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    conv = await _own_session(db, user, session_id)
+    rows = (
+        await db.scalars(
+            select(Message)
+            .where(Message.conversation_id == conv.id)
+            .order_by(Message.id.asc())
+        )
+    ).all()
+    return {
+        "messages": [
+            {"role": r.role, "content": r.content, "created_at": r.created_at.isoformat()}
+            for r in rows
+        ]
+    }
+
+
+@router.put("/chat/sessions/{session_id}/messages")
+async def sync_chat_session(
+    session_id: str,
+    payload: RagSessionSync,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """全量同步会话轮次（客户端完成一轮后上报完整列表，幂等重写）。
+    ponytail: 信任客户端内容的全量重写——P1 内部门户够用；对外产品需服务端
+    拦流落库（chat_completions 流式 tee）再升级。"""
+    conv = await _own_session(db, user, session_id)
+    await db.execute(
+        sa_delete(Message).where(Message.conversation_id == conv.id)
+    )
+    for m in payload.messages:
+        db.add(Message(conversation_id=conv.id, role=m.role, content=m.content))
+    conv.message_count = len(payload.messages)
+    if payload.title is not None:
+        conv.title = payload.title[:200]
+    await db.commit()
+    return {"id": str(conv.id), "message_count": conv.message_count}
+
+
+@router.delete("/chat/sessions/{session_id}", status_code=204)
+async def delete_chat_session(
+    session_id: str,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    conv = await _own_session(db, user, session_id)
+    conv.deleted_at = func.now()
+    await db.commit()
 
 
 # ---- 租户绑定管理（PLATFORM_ADMIN） ----

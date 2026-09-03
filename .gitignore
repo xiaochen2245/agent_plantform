@@ -29,3 +29,6 @@ dist/
 # uploads (dev)
 backend/uploads/
 backend/storage/
+
+# git worktrees
+worktrees/

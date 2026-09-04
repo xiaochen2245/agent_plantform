@@ -226,10 +226,12 @@ class DocumentChunk(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False, comment="切片纯文本内容或表格 Markdown")
     token_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
-    # pgvector 稠密向量 (1536 维标准嵌入)
+    # pgvector 稠密向量 (1536 维标准嵌入，在 SQLite/本地测试平滑降级为 Text)
     if HAS_PGVECTOR and Vector is not None:
         embedding: Mapped[Optional[Any]] = mapped_column(
-            Vector(1536), nullable=True, comment="1536维文本嵌入向量"
+            Vector(1536).with_variant(Text(), "sqlite"),
+            nullable=True,
+            comment="1536维文本嵌入向量"
         )
     else:
         # Fallback 兼容层
@@ -408,7 +410,117 @@ class ReviewResult(Base):
 
 
 # ---------------------------------------------------------------------------
-# 6. PostgreSQL 行级安全策略 (Row-Level Security / RLS) DDL 生成脚本
+# 6. 历史工程审查风险与经验知识库实体 (HistoricalAuditRisk) - Feature 29
+# ---------------------------------------------------------------------------
+
+class HistoricalAuditRisk(Base):
+    """
+    历史工程审查风险知识库实体
+    存储历史工程项目审计失败表单、缺陷条款、合同纠纷案件及重大处罚记录
+    支持:
+    1. 租户物理/逻辑硬隔离 (tenant_id 与 PostgreSQL 16+ RLS)
+    2. pgvector 1536 维向量余弦索引 (HNSW)
+    3. 多维度工程特征标签与数值阈值触发检索
+    4. 预防性系统提示词护栏 (preventive_guardrail_prompt)
+    """
+    __tablename__ = "historical_audit_risks"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=generate_uuid)
+    tenant_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True,
+        comment="租户唯一标识 (硬隔离边界)"
+    )
+
+    # 业务分类与工程属性
+    project_type: Mapped[str] = mapped_column(
+        String(64), nullable=False, index=True,
+        comment="工程大类: 房建, 市政, 弱电智能化, 轨道交通, 水利水电, 公路桥梁..."
+    )
+    risk_category: Mapped[str] = mapped_column(
+        String(64), nullable=False, index=True,
+        comment="风险类别: 工期延误, 造价超概, 安全基坑坍塌, 环保违规, 资质造假, 质量通病, 合同纠纷..."
+    )
+    risk_title: Mapped[str] = mapped_column(
+        String(512), nullable=False, comment="风险条目标题"
+    )
+    severity: Mapped[SeverityLevel] = mapped_column(
+        SQLEnum(SeverityLevel), default=SeverityLevel.HIGH, nullable=False, index=True,
+        comment="风险严重等级: CRITICAL / HIGH / MEDIUM / LOW"
+    )
+
+    # 案例描述与经验教训
+    defect_description: Mapped[str] = mapped_column(
+        Text, nullable=False, comment="历史工程失误描述、缺陷条款、合同纠纷记录或行政处罚案情"
+    )
+    lesson_learned: Mapped[str] = mapped_column(
+        Text, nullable=False, comment="历史教训与复盘总结，阐明根因与治理经验"
+    )
+    preventive_guardrail_prompt: Mapped[str] = mapped_column(
+        Text, nullable=False, comment="预防性防护约束提示词，用于直接注入 Generator Agent 的系统提示词中"
+    )
+
+    # 标签与匹配规则属性
+    tags: Mapped[List[str]] = mapped_column(
+        JSON_VARIANT, default=list, nullable=False,
+        comment="规则标签列表: ['深基坑', '开挖深度>5m', '危大工程', '雨季施工', '超概算', '一级建造师']"
+    )
+    rule_conditions: Mapped[Dict[str, Any]] = mapped_column(
+        JSON_VARIANT, default=dict, nullable=False,
+        comment="结构化参数触发阈值: {'min_excavation_depth': 5.0, 'max_duration_days': 120}"
+    )
+
+    # 历史案卷溯源数据 (审计追踪与商业智能)
+    source_case_id: Mapped[Optional[str]] = mapped_column(
+        String(128), nullable=True, comment="关联历史案卷/工程项目编号，如 'PRJ-2024-SZ-041'"
+    )
+    source_project_name: Mapped[Optional[str]] = mapped_column(
+        String(512), nullable=True, comment="原工程名称，如 '某市轨道交通三期深基坑工程'"
+    )
+    financial_loss_cny: Mapped[Optional[float]] = mapped_column(
+        Float, nullable=True, comment="经济损失/违约索赔/行政处罚金额 (万元)"
+    )
+    delay_days: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True, comment="造成的工期延误天数"
+    )
+
+    # pgvector 1536 维向量列 (兼容 SQLite 文本存储)
+    if HAS_PGVECTOR and Vector is not None:
+        embedding: Mapped[Optional[Any]] = mapped_column(
+            Vector(1536).with_variant(Text(), "sqlite"),
+            nullable=True,
+            comment="1536维文本嵌入向量"
+        )
+    else:
+        embedding: Mapped[Optional[str]] = mapped_column(
+            Text, nullable=True, comment="向量数据(Base64或JSON浮点数组)"
+        )
+
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    # 关系映射
+    tenant: Mapped["Tenant"] = relationship("Tenant")
+
+    __table_args__ = (
+        Index("idx_hist_risk_tenant_proj", "tenant_id", "project_type"),
+        Index("idx_hist_risk_tenant_cat", "tenant_id", "risk_category"),
+        Index("idx_hist_risk_tenant_severity", "tenant_id", "severity"),
+        Index(
+            "idx_hist_risk_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_with={"m": 16, "ef_construction": 64},
+            postgresql_ops={"embedding": "vector_cosine_ops"}
+        ) if HAS_PGVECTOR and Vector is not None else Index("idx_hist_risk_mock", "tenant_id", "project_type"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# 7. PostgreSQL 行级安全策略 (Row-Level Security / RLS) DDL 生成脚本
 # ---------------------------------------------------------------------------
 
 def generate_rls_sql(tables: Optional[List[str]] = None) -> str:
@@ -420,7 +532,7 @@ def generate_rls_sql(tables: Optional[List[str]] = None) -> str:
     2. FORCE ROW LEVEL SECURITY: 强制表拥有者 (Table Owner / App DB User) 同样受到 RLS 约束，杜绝越权。
     3. NULLIF(current_setting('app.current_tenant_id', true), ''): 租户未设置时安全求值为 NULL，禁止返回任何数据。
     """
-    target_tables = tables or ["documents", "document_chunks", "audit_tasks", "review_results"]
+    target_tables = tables or ["documents", "document_chunks", "audit_tasks", "review_results", "historical_audit_risks"]
     ddl_statements = [
         "-- 启用 PostgreSQL 行级安全 (Row-Level Security)",
         "CREATE EXTENSION IF NOT EXISTS vector;",

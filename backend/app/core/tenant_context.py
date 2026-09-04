@@ -53,12 +53,33 @@ class TenantContext:
         return _tenant_context_var.get()
 
 
+def is_postgres_session(session: AsyncSession) -> bool:
+    """
+    检查当前会话是否连接至 PostgreSQL 引擎。
+    具备完全防御性：安全处理未绑定会话、Mock 会话以及非 PostgreSQL 数据库方言。
+    """
+    try:
+        bind = getattr(session, "bind", None)
+        if bind is None and hasattr(session, "get_bind"):
+            bind = session.get_bind()
+        return bool(bind and hasattr(bind, "dialect") and bind.dialect.name == "postgresql")
+    except Exception:
+        return False
+
+
 async def apply_tenant_rls_session(session: AsyncSession, tenant_id: Optional[str] = None) -> None:
     """
-    在当前异步 Session 事务中设置 PostgreSQL 运行时变量，触发数据库原生 RLS
+    在当前异步 Session 事务中设置 PostgreSQL 运行时变量，触发数据库原生 RLS。
+    采用参数化安全函数调用：SELECT set_config('app.current_tenant_id', :tid, true)。
+    若为 SQLite 等非 PostgreSQL 环境，则安全跳过，由 TenantContext 维持应用层内存隔离。
     """
+    if not is_postgres_session(session):
+        return
     tid = tenant_id or TenantContext.get_current_tenant_id()
-    await session.execute(text(f"SET LOCAL app.current_tenant_id = :tid"), {"tid": tid})
+    await session.execute(
+        text("SELECT set_config('app.current_tenant_id', :tid, true)"),
+        {"tid": tid},
+    )
 
 
 def filter_by_tenant(statement: Select, model_cls) -> Select:

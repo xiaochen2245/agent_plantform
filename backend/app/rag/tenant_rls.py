@@ -8,7 +8,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 from sqlalchemy import Select, text
 from sqlalchemy.ext.asyncio import AsyncSession, AsyncEngine
 
-from app.core.tenant_context import TenantContext
+from app.core.tenant_context import TenantContext, is_postgres_session
 
 
 # 受 PostgreSQL 行级安全保护的多租户核心表
@@ -17,6 +17,7 @@ RLS_PROTECTED_TABLES: List[str] = [
     "document_chunks",
     "audit_tasks",
     "review_results",
+    "historical_audit_risks",
 ]
 
 
@@ -72,21 +73,21 @@ class TenantRLSManager:
     @classmethod
     def is_postgres_session(cls, session: AsyncSession) -> bool:
         """检查当前会话是否连接至 PostgreSQL 引擎"""
-        bind = session.bind or session.get_bind()
-        return bool(bind and bind.dialect.name == "postgresql")
+        return is_postgres_session(session)
 
     @classmethod
     async def apply_rls(cls, session: AsyncSession, tenant_id: Optional[str] = None) -> None:
         """
-        在当前会话的事务中应用 SET LOCAL app.current_tenant_id = :tid。
+        在当前会话的事务中应用 SELECT set_config('app.current_tenant_id', :tid, true)。
         若非 PostgreSQL 环境 (如测试 SQLite)，则跳过 SQL 执行，由 TenantContext 维持内存上下文。
         """
+        if not cls.is_postgres_session(session):
+            return
         tid = tenant_id or TenantContext.get_current_tenant_id()
-        if cls.is_postgres_session(session):
-            await session.execute(
-                text("SET LOCAL app.current_tenant_id = :tid"),
-                {"tid": tid}
-            )
+        await session.execute(
+            text("SELECT set_config('app.current_tenant_id', :tid, true)"),
+            {"tid": tid},
+        )
 
     @classmethod
     @asynccontextmanager
@@ -98,7 +99,7 @@ class TenantRLSManager:
         """
         异步上下文管理器：
         1. 自动进入事务 (session.begin())
-        2. 设置 SET LOCAL app.current_tenant_id
+        2. 设置 SELECT set_config('app.current_tenant_id', :tid, true)
         3. 绑定 Python TenantContext
         4. 异常自动回滚，正常提交，事务结束自动重置局部变量
         """
@@ -108,16 +109,10 @@ class TenantRLSManager:
             if cls.is_postgres_session(session):
                 if not session.in_transaction():
                     async with session.begin():
-                        await session.execute(
-                            text("SET LOCAL app.current_tenant_id = :tid"),
-                            {"tid": tid}
-                        )
+                        await cls.apply_rls(session, tid)
                         yield session
                 else:
-                    await session.execute(
-                        text("SET LOCAL app.current_tenant_id = :tid"),
-                        {"tid": tid}
-                    )
+                    await cls.apply_rls(session, tid)
                     yield session
             else:
                 # SQLite 测试环境

@@ -237,6 +237,10 @@ class EmbeddingService:
         vecs = await self.provider.embed_documents([text])
         return vecs[0]
 
+    async def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        """为多条文本批量生成嵌入向量"""
+        return await self.provider.embed_documents(texts)
+
     async def embed_chunks(
         self,
         chunks: List[DocumentChunk],

@@ -330,6 +330,56 @@ class ParentChildChunker:
         p_max = max(pages) if pages else 1
         return "\n\n".join(filter(None, parts)), p_min, p_max, first_bbox, node_ids, block_types
 
+    def _physical_split_text(self, text: str, max_tokens: int, overlap_tokens: int = 0) -> List[str]:
+        """
+        物理字符/Token硬截断切片，用于处理无标点分隔符的超长连续文本。
+        采用滑动字符二分窗口，确保每个分片严格满足 Token 上限约束。
+        """
+        if not text:
+            return []
+        if TokenCounter.count(text) <= max_tokens:
+            return [text]
+
+        slices: List[str] = []
+        start = 0
+        text_len = len(text)
+        while start < text_len:
+            low = start + 1
+            high = min(text_len, start + max_tokens * 4)
+            best_end = low
+            while low <= high:
+                mid = (low + high) // 2
+                cand = text[start:mid]
+                if TokenCounter.count(cand) <= max_tokens:
+                    best_end = mid
+                    low = mid + 1
+                else:
+                    high = mid - 1
+
+            chunk = text[start:best_end]
+            if not chunk:
+                break
+            slices.append(chunk)
+            if best_end >= text_len:
+                break
+
+            if overlap_tokens > 0:
+                overlap_low = max(start, best_end - overlap_tokens * 4)
+                overlap_high = best_end
+                best_overlap_start = best_end
+                while overlap_low <= overlap_high:
+                    mid = (overlap_low + overlap_high) // 2
+                    overlap_cand = text[mid:best_end]
+                    if TokenCounter.count(overlap_cand) <= overlap_tokens:
+                        best_overlap_start = mid
+                        overlap_high = mid - 1
+                    else:
+                        overlap_low = mid + 1
+                start = max(start + 1, best_overlap_start)
+            else:
+                start = best_end
+        return slices
+
     def _split_large_parent_content(
         self,
         rendered_content: str,
@@ -352,6 +402,37 @@ class ParentChildChunker:
                 sents = [s.strip() for s in re.split(r'(?<=[。！？；!?;\n])', p) if s.strip()]
                 for s in sents:
                     s_tok = TokenCounter.count(s)
+                    if s_tok > self.config.parent_max_tokens:
+                        # 单句依然超出 parent_max_tokens (无标点超长连续文本)，物理硬截断
+                        sub_slices = self._physical_split_text(
+                            s,
+                            max_tokens=self.config.parent_max_tokens,
+                            overlap_tokens=self.config.parent_overlap_tokens,
+                        )
+                        for sub in sub_slices:
+                            if buf:
+                                sub_groups.append({
+                                    "content": "\n\n".join(buf),
+                                    "section_path": section_path,
+                                    "page_number": page_min,
+                                    "page_range": [page_min, page_max],
+                                    "bbox": bbox,
+                                    "node_ids": node_ids,
+                                    "block_types": block_types,
+                                })
+                                buf = []
+                                buf_tokens = 0
+                            sub_groups.append({
+                                "content": sub,
+                                "section_path": section_path,
+                                "page_number": page_min,
+                                "page_range": [page_min, page_max],
+                                "bbox": bbox,
+                                "node_ids": node_ids,
+                                "block_types": block_types,
+                            })
+                        continue
+
                     if buf and (buf_tokens + s_tok > self.config.parent_max_tokens):
                         sub_groups.append({
                             "content": "\n\n".join(buf),
@@ -409,29 +490,41 @@ class ParentChildChunker:
         支持:
         1. 表格多行结构化提取 (保留表头)；
         2. 进度任务单项提取；
-        3. 自然语言按原子命题/标点分句，滑动聚合。
+        3. 自然语言按原子命题/标点分句，滑动聚合；
+        4. 混合排版：确保同章节内的表格/进度任务与正文段落全部生成 Child 切片，不静默丢失。
         """
         children: List[DocumentChunk] = []
         idx = start_index
         nodes: List[ASTNode] = raw_group.get("nodes", [])
 
-        # 检查是否包含表格或进度任务 AST 节点，优先进行结构化提取
-        handled_nodes = False
-        if nodes and self.config.table_row_chunking:
+        if nodes:
+            # 区分结构化节点 (表格、任务) 与正文段落节点
+            text_nodes: List[ASTNode] = []
             for n in nodes:
-                if n.block_type == ASTBlockType.TABLE and n.table_data:
+                if n.block_type == ASTBlockType.TABLE and n.table_data and self.config.table_row_chunking:
                     table_children = self._chunk_table_node(n, parent_chunk, idx)
                     children.extend(table_children)
                     idx += len(table_children)
-                    handled_nodes = True
                 elif n.block_type == ASTBlockType.SCHEDULE_TASK and n.schedule_data:
                     task_child = self._chunk_schedule_node(n, parent_chunk, idx)
                     children.append(task_child)
                     idx += 1
-                    handled_nodes = True
+                else:
+                    text_nodes.append(n)
 
-        # 如果没有特殊结构节点或特殊节点切分后内容不完全，对 Parent 的纯文本执行原子命题切分
-        if not handled_nodes:
+            # 对同章节内的所有正文段落/标题节点进行原子切分，确保正文段落不丢失
+            if text_nodes:
+                text_content, _, _, _, _, _ = self._render_nodes_content(text_nodes)
+                if text_content.strip():
+                    text_children = self._chunk_text_to_children(
+                        parent_content=text_content,
+                        parent_chunk=parent_chunk,
+                        start_index=idx,
+                    )
+                    children.extend(text_children)
+                    idx += len(text_children)
+        else:
+            # 若无原始节点元数据 (如文本拆分后的 sub_group)，直接对 parent_chunk.content 进行正文切块
             text_children = self._chunk_text_to_children(
                 parent_content=parent_chunk.content,
                 parent_chunk=parent_chunk,
@@ -483,9 +576,15 @@ class ParentChildChunker:
                     buf = []
                     buf_tokens = 0
                 
-                # 硬切单个超长句
-                sub_sents = [sent[i:i+200] for i in range(0, len(sent), 200)]
-                for sub in sub_sents:
+                # 针对无标点超长连续文本，按 Token 预算执行严密物理截断切片
+                effective_max = max(32, self.config.child_max_tokens - prefix_tokens)
+                effective_overlap = min(self.config.child_overlap_tokens, effective_max // 4)
+                sub_slices = self._physical_split_text(
+                    sent,
+                    max_tokens=effective_max,
+                    overlap_tokens=effective_overlap,
+                )
+                for sub in sub_slices:
                     sub_text = (prefix + sub).strip()
                     children.append(
                         self._create_child_chunk(

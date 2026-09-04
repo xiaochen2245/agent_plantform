@@ -8,12 +8,16 @@
 """
 
 from collections import Counter
+import functools
+import logging
 import math
 import re
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from app.models.audit_rag import (
     ChunkLevel,
@@ -38,6 +42,8 @@ class SearchResultItem(BaseModel):
     dense_score: Optional[float] = Field(None, description="稠密余弦相似度 [0.0 ~ 1.0]")
     sparse_score: Optional[float] = Field(None, description="BM25 原始分值")
     rrf_score: float = Field(0.0, description="RRF 融合综合得分")
+    rerank_score: Optional[float] = Field(None, description="Cross-Encoder 重排序得分")
+    rerank_rank: Optional[int] = Field(None, description="Cross-Encoder 精排名次")
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -64,12 +70,9 @@ class BM25Tokenizer:
     _CHINESE_PATTERN = re.compile(r'[\u4e00-\u9fff]+')
 
     @classmethod
-    def tokenize(cls, text: str) -> List[str]:
-        if not text:
-            return []
-
+    @functools.lru_cache(maxsize=16384)
+    def _tokenize_cached(cls, text: str) -> Tuple[str, ...]:
         text_lower = text.lower()
-
         if cls._HAS_JIEBA:
             import jieba
             tokens = [t.strip() for t in jieba.cut_for_search(text_lower) if t.strip()]
@@ -87,7 +90,13 @@ class BM25Tokenizer:
                     tokens.extend([part[i:i+2] for i in range(len(part) - 1)])
 
         # 过滤过短无意义停用字符
-        return [t for t in tokens if len(t) > 0 and t not in {" ", "\t", "\n"}]
+        return tuple(t for t in tokens if len(t) > 0 and t not in {" ", "\t", "\n"})
+
+    @classmethod
+    def tokenize(cls, text: str) -> List[str]:
+        if not text:
+            return []
+        return list(cls._tokenize_cached(text))
 
 
 class InMemoryBM25:
@@ -178,24 +187,32 @@ class InMemoryBM25:
 class HybridSearchEngine:
     """
     生产级混合检索引擎 (Hybrid Search Engine)
-    结合 pgvector HNSW 向量检索与 BM25 词法检索，使用 RRF (Reciprocal Rank Fusion) 融合
+    结合 pgvector HNSW 向量检索与 BM25 词法检索，使用 RRF (Reciprocal Rank Fusion) 融合，
+    并可选串联 CrossEncoderReranker 深度模型精排，具备租户级 BM25 倒排索引缓存加速。
     """
 
     def __init__(
         self,
         embedding_service: Optional[EmbeddingService] = None,
+        reranker: Optional[Any] = None,
         rrf_k: int = 60,
         dense_weight: float = 0.6,
         sparse_weight: float = 0.4,
         dense_top_k: int = 20,
         sparse_top_k: int = 20,
+        enable_bm25_cache: bool = True,
     ):
         self.embedding_service = embedding_service or get_embedding_service()
+        self.reranker = reranker
         self.rrf_k = rrf_k
         self.dense_weight = dense_weight
         self.sparse_weight = sparse_weight
         self.dense_top_k = dense_top_k
         self.sparse_top_k = sparse_top_k
+        self.enable_bm25_cache = enable_bm25_cache
+        self._bm25_cache: Dict[str, Dict[str, Any]] = {}
+        self.cache_hits: int = 0
+        self.cache_misses: int = 0
 
     async def search(
         self,
@@ -204,13 +221,14 @@ class HybridSearchEngine:
         query: str,
         top_k: int = 20,
         document_id: Optional[str] = None,
-    ) -> List[SearchResultItem]:
+    ) -> List[Any]:
         """
         全流程检索执行:
         1. 获取查询的 1536 维向量；
         2. 执行稠密检索 (pgvector HNSW / 内存余弦降级)；
-        3. 执行稀疏检索 (BM25Okapi)；
-        4. 执行 RRF 融合打分，返回 Top-K 命中。
+        3. 执行稀疏检索 (BM25Okapi 带租户级倒排缓存)；
+        4. 执行 RRF 融合打分；
+        5. 若配置 reranker，则对融合候选集执行深度重排序并返回精排结果。
         """
         if not query.strip():
             return []
@@ -236,11 +254,21 @@ class HybridSearchEngine:
         )
 
         # 3. 倒数排名融合 (RRF)
+        # 若需要重排，保证输入精排的候选池充足以对齐召回 (至少 20 或 top_k)
+        fusion_k = max(top_k, self.dense_top_k, self.sparse_top_k, 20) if self.reranker else top_k
         fused_items = self._reciprocal_rank_fusion(
             dense_items=dense_results,
             sparse_items=sparse_results,
-            top_k=top_k,
+            top_k=fusion_k,
         )
+
+        # 4. Cross-Encoder 深度重排序
+        if self.reranker is not None:
+            return await self.reranker.rerank(
+                query=query,
+                candidates=fused_items,
+                top_k=top_k,
+            )
 
         return fused_items
 
@@ -259,19 +287,35 @@ class HybridSearchEngine:
         """
         稠密检索：
         - PostgreSQL + pgvector: 使用原生 <=> 余弦距离操作符与 HNSW 索引
-        - SQLite / 测试环境: 查询当前租户所有 Child 切片，在内存中计算余弦相似度并排序
+        - 异常或 SQLite / 测试环境: 查询当前租户所有 Child 切片，在内存中计算余弦相似度并排序
         """
-        bind = session.bind
-        dialect_name = bind.dialect.name if bind else "sqlite"
+        try:
+            bind = getattr(session, "bind", None)
+            if bind is None and hasattr(session, "get_bind"):
+                bind = session.get_bind()
+            dialect_name = bind.dialect.name if bind and hasattr(bind, "dialect") else "sqlite"
+        except Exception:
+            dialect_name = "sqlite"
 
         if dialect_name == "postgresql" and HAS_PGVECTOR:
-            return await self._search_dense_postgresql(
-                session=session,
-                tenant_id=tenant_id,
-                query_vector=query_vector,
-                top_k=top_k,
-                document_id=document_id,
-            )
+            try:
+                return await self._search_dense_postgresql(
+                    session=session,
+                    tenant_id=tenant_id,
+                    query_vector=query_vector,
+                    top_k=top_k,
+                    document_id=document_id,
+                )
+            except Exception as exc:
+                # 若 PostgreSQL 环境未安装 vector 扩展或表无 vector 列，安全降级到内存计算
+                logger.warning(f"PostgreSQL pgvector 检索失败，自动降级至内存余弦计算: {exc}")
+                return await self._search_dense_in_memory_fallback(
+                    session=session,
+                    tenant_id=tenant_id,
+                    query_vector=query_vector,
+                    top_k=top_k,
+                    document_id=document_id,
+                )
         else:
             return await self._search_dense_in_memory_fallback(
                 session=session,
@@ -394,7 +438,8 @@ class HybridSearchEngine:
     ) -> List[SearchResultItem]:
         """
         稀疏检索：
-        加载当前租户的目标候选切片，构建或应用内存 BM25 索引
+        加载当前租户的目标候选切片，支持租户级倒排索引内存缓存，
+        避免单次查询重复全量构建 InMemoryBM25 索引。
         """
         stmt = (
             select(DocumentChunk)
@@ -413,15 +458,39 @@ class HybridSearchEngine:
             return []
 
         chunk_dict = {c.id: c for c in chunks}
-        corpus = [(c.id, c.content) for c in chunks]
+        current_chunk_ids = tuple(c.id for c in chunks)
+        cache_key = f"{tenant_id}:{document_id or '*'}"
+        cached_entry = self._bm25_cache.get(cache_key) if self.enable_bm25_cache else None
 
-        bm25 = InMemoryBM25()
-        bm25.fit(corpus)
+        if (
+            self.enable_bm25_cache
+            and cached_entry is not None
+            and cached_entry.get("chunk_ids") == current_chunk_ids
+        ):
+            bm25 = cached_entry["bm25"]
+            chunk_dict = cached_entry["chunk_dict"]
+            self.cache_hits += 1
+            cached_entry["hit_count"] = cached_entry.get("hit_count", 0) + 1
+        else:
+            corpus = [(c.id, c.content) for c in chunks]
+            bm25 = InMemoryBM25()
+            bm25.fit(corpus)
+            self.cache_misses += 1
+            if self.enable_bm25_cache:
+                self._bm25_cache[cache_key] = {
+                    "bm25": bm25,
+                    "chunk_dict": chunk_dict,
+                    "chunk_ids": current_chunk_ids,
+                    "hit_count": 0,
+                }
+
         ranked_hits = bm25.search(query, top_k=top_k)
 
         items: List[SearchResultItem] = []
         for cid, score in ranked_hits:
-            c = chunk_dict[cid]
+            c = chunk_dict.get(cid)
+            if not c:
+                continue
             items.append(
                 SearchResultItem(
                     chunk_id=c.id,
@@ -436,6 +505,21 @@ class HybridSearchEngine:
                 )
             )
         return items
+
+    def clear_bm25_cache(self, tenant_id: Optional[str] = None) -> None:
+        """清空 BM25 租户缓存 (支持按租户或全量清空)"""
+        if tenant_id:
+            keys_to_remove = [k for k in self._bm25_cache if k.startswith(f"{tenant_id}:")]
+            for k in keys_to_remove:
+                self._bm25_cache.pop(k, None)
+        else:
+            self._bm25_cache.clear()
+
+    def get_cached_bm25(self, tenant_id: str, document_id: Optional[str] = None) -> Optional[InMemoryBM25]:
+        """获取指定租户已缓存的 InMemoryBM25 索引实例"""
+        cache_key = f"{tenant_id}:{document_id or '*'}"
+        entry = self._bm25_cache.get(cache_key)
+        return entry["bm25"] if entry else None
 
     # -----------------------------------------------------------------------
     # 倒数排名融合 (Reciprocal Rank Fusion)

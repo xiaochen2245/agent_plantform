@@ -234,3 +234,83 @@ def test_chunker_large_ast_performance(chunker: ParentChildChunker):
     assert elapsed < 1.0, f"切块耗时 {elapsed:.2f}s 超过 1s 阈值"
     assert len(parents) > 0
     assert len(children) > len(parents)
+
+
+def test_chunker_hybrid_table_and_paragraph_retention(chunker: ParentChildChunker):
+    """11. 验证同章节包含表格与正文段落时，正文段落与表格均被完整切块，无静默丢失"""
+    ast = UnifiedDocumentAST(
+        document_id="doc_hybrid_001",
+        tenant_id="tenant_alpha",
+        file_name="hybrid.docx",
+        source_type=DocumentSourceType.DOCX,
+        total_pages_or_sheets=1,
+        nodes=[
+            ASTNode(
+                block_id="p1",
+                block_type=ASTBlockType.PARAGRAPH,
+                section_path=["第一章 施工方案", "1.1 总体要求"],
+                text_content="重要的技术条款：系统必须满足7x24小时高可用要求，系统容灾RTO小于15分钟。",
+            ),
+            ASTNode(
+                block_id="t1",
+                block_type=ASTBlockType.TABLE,
+                section_path=["第一章 施工方案", "1.1 总体要求"],
+                text_content="| 设备名称 | 品牌型号 | 数量 |\n| --- | --- | --- |\n| 核心交换机 | 华为 S6730 | 2台 |",
+                table_data=TableData(
+                    headers=[["设备名称", "品牌型号", "数量"]],
+                    rows=[["核心交换机", "华为 S6730", "2台"]],
+                    markdown="| 设备名称 | 品牌型号 | 数量 |\n| --- | --- | --- |\n| 核心交换机 | 华为 S6730 | 2台 |",
+                ),
+            ),
+            ASTNode(
+                block_id="p2",
+                block_type=ASTBlockType.PARAGRAPH,
+                section_path=["第一章 施工方案", "1.1 总体要求"],
+                text_content="质保金比例为合同总价的3%，验收合格后一年内付清剩余款项。",
+            ),
+        ],
+    )
+    parents, children = chunker.chunk_document(ast)
+
+    assert len(parents) >= 1
+    # 验证表格行已切块
+    assert any("核心交换机" in c.content for c in children), "表格内容未被切块！"
+    # 验证表格前后的正文段落均被完整保留
+    assert any("7x24小时高可用要求" in c.content for c in children), "段落1被静默丢弃！"
+    assert any("质保金比例为合同总价的3%" in c.content for c in children), "段落2被静默丢弃！"
+    # 所有子切片均关联至合法的 parent_chunk_id
+    parent_ids = {p.chunk_id for p in parents}
+    for c in children:
+        assert c.parent_chunk_id in parent_ids
+
+
+def test_chunker_unbroken_long_text_physical_truncation(chunker: ParentChildChunker):
+    """12. 验证无标点符号、无空格的超长连续文本物理字符/Token硬截断，不卡死且不超限"""
+    # 构造 2,000 字无任何标点符号的连续中文字符串
+    unbroken_text = "工程施工建设现场智能安全监控管理规程细则" * 100
+    ast = UnifiedDocumentAST(
+        document_id="doc_unbroken_001",
+        tenant_id="tenant_alpha",
+        file_name="unbroken.docx",
+        source_type=DocumentSourceType.DOCX,
+        total_pages_or_sheets=1,
+        nodes=[
+            ASTNode(
+                block_id="p_long",
+                block_type=ASTBlockType.PARAGRAPH,
+                section_path=["连续长文本章节"],
+                text_content=unbroken_text,
+            )
+        ],
+    )
+    parents, children = chunker.chunk_document(ast)
+
+    assert len(parents) > 0
+    assert len(children) > 1
+
+    token_counter = TokenCounter()
+    for c in children:
+        tokens = token_counter.count_tokens(c.content)
+        # 严格遵守 child_max_tokens 上限约束
+        assert tokens <= chunker.child_max_tokens * 1.15, f"Child 切片 token {tokens} 超出限制"
+

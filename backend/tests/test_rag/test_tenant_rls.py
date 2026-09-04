@@ -4,11 +4,12 @@ PostgreSQL 16+ 行级安全 (RLS) 与多租户硬隔离测试套件
 """
 
 import asyncio
+from unittest.mock import AsyncMock, MagicMock
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.tenant_context import TenantContext
+from app.core.tenant_context import TenantContext, apply_tenant_rls_session, is_postgres_session
 from app.db.session import SessionLocal, engine
 from app.models.audit_rag import (
     AuditTask,
@@ -75,8 +76,8 @@ def test_rls_sql_generation_policy_names():
 
 
 def test_rls_all_four_tables_covered():
-    """3. 验证受保护表全覆盖: documents, document_chunks, audit_tasks, review_results"""
-    expected_tables = {"documents", "document_chunks", "audit_tasks", "review_results"}
+    """3. 验证受保护表全覆盖: documents, document_chunks, audit_tasks, review_results, historical_audit_risks"""
+    expected_tables = {"documents", "document_chunks", "audit_tasks", "review_results", "historical_audit_risks"}
     assert set(RLS_PROTECTED_TABLES) == expected_tables
 
     ddl = rag_generate_rls_sql()
@@ -175,3 +176,73 @@ async def test_rls_thread_context_isolation():
     for i in range(1, 6):
         name = f"tenant_{i}"
         assert observed_tenants[name] == name
+
+
+def test_is_postgres_session_dialects(rls_test_session: AsyncSession):
+    """11. 验证方言检测：SQLite 与未绑定会话返回 False，PostgreSQL 返回 True"""
+    # SQLite 内存会话检测
+    assert not TenantRLSManager.is_postgres_session(rls_test_session)
+    assert not is_postgres_session(rls_test_session)
+
+    # 未绑定 session 防御性检测 (防止 AttributeError)
+    unbound_session = AsyncSession()
+    assert not TenantRLSManager.is_postgres_session(unbound_session)
+    assert not is_postgres_session(unbound_session)
+
+    # Mock PostgreSQL 会话检测
+    mock_bind = MagicMock()
+    mock_bind.dialect.name = "postgresql"
+    mock_pg_session = AsyncMock(spec=AsyncSession)
+    mock_pg_session.bind = mock_bind
+    assert TenantRLSManager.is_postgres_session(mock_pg_session)
+    assert is_postgres_session(mock_pg_session)
+
+
+@pytest.mark.asyncio
+async def test_apply_rls_sqlite_safe_noop(rls_test_session: AsyncSession):
+    """12. 验证在 SQLite 环境下调用 apply_rls 与 apply_tenant_rls_session 安全静默跳过"""
+    # 不抛出 OperationalError (例如 near "SET": syntax error 或 no such function: set_config)
+    await TenantRLSManager.apply_rls(rls_test_session, "tenant_alpha")
+    await apply_tenant_rls_session(rls_test_session, "tenant_alpha")
+
+
+@pytest.mark.asyncio
+async def test_apply_rls_postgres_executes_set_config():
+    """13. 验证 PostgreSQL 环境下使用 SELECT set_config 参数化设置会话租户"""
+    mock_bind = MagicMock()
+    mock_bind.dialect.name = "postgresql"
+    mock_session = AsyncMock(spec=AsyncSession)
+    mock_session.bind = mock_bind
+    mock_session.in_transaction.return_value = True
+
+    # 1. 测试 TenantRLSManager.apply_rls
+    await TenantRLSManager.apply_rls(mock_session, "tenant_alpha")
+    assert mock_session.execute.called
+    stmt, params = mock_session.execute.call_args[0]
+    assert "SELECT set_config('app.current_tenant_id', :tid, true)" in str(stmt)
+    assert params == {"tid": "tenant_alpha"}
+    assert "SET LOCAL" not in str(stmt)
+
+    # 2. 测试 apply_tenant_rls_session
+    mock_session.execute.reset_mock()
+    await apply_tenant_rls_session(mock_session, "tenant_beta")
+    assert mock_session.execute.called
+    stmt, params = mock_session.execute.call_args[0]
+    assert "SELECT set_config('app.current_tenant_id', :tid, true)" in str(stmt)
+    assert params == {"tid": "tenant_beta"}
+
+
+@pytest.mark.asyncio
+async def test_verify_isolation_postgres_mock():
+    """14. 验证 verify_isolation 在 PostgreSQL 下使用 current_setting 校验"""
+    mock_bind = MagicMock()
+    mock_bind.dialect.name = "postgresql"
+    mock_session = AsyncMock(spec=AsyncSession)
+    mock_session.bind = mock_bind
+    mock_result = MagicMock()
+    mock_result.scalar.return_value = "tenant_gamma"
+    mock_session.execute.return_value = mock_result
+
+    assert await TenantRLSManager.verify_isolation(mock_session, "tenant_gamma") is True
+    assert await TenantRLSManager.verify_isolation(mock_session, "tenant_other") is False
+

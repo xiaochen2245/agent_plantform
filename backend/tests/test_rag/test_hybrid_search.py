@@ -11,6 +11,7 @@ from app.db.session import SessionLocal, engine
 from app.models.audit_rag import Base, ChunkLevel, Document, DocumentChunk, Tenant
 from app.rag.embedding import EmbeddingService, MockDeterministicEmbeddingProvider
 from app.rag.hybrid_search import BM25Tokenizer, HybridSearchEngine, InMemoryBM25, SearchResultItem
+from app.rag.reranker import CrossEncoderReranker, RerankResult
 
 
 @pytest.fixture
@@ -350,3 +351,164 @@ async def test_hybrid_top_k_recall_threshold(
 
     recall_rate = hit_count / len(test_pairs)
     assert recall_rate >= 0.95, f"Top-5 召回率 {recall_rate:.2%} 未达到 95% 准则"
+
+
+@pytest.mark.asyncio
+async def test_bm25_tenant_cache_reuse(
+    hybrid_search_engine: HybridSearchEngine,
+    async_sqlite_session: AsyncSession
+):
+    """11. 验证租户级 BM25 倒排索引缓存：多次重复检索命中缓存，避免重复分词与建索引"""
+    import json
+    chunks = [
+        DocumentChunk(
+            id="c_bm25_cache_1",
+            tenant_id="tenant_a",
+            document_id="doc_a",
+            chunk_level=ChunkLevel.CHILD,
+            chunk_index=101,
+            section_path="网络设备",
+            content="华为核心交换机型号 S6730-H 具备 100G 上行接口",
+            embedding=json.dumps([0.1] * 1536),
+        ),
+        DocumentChunk(
+            id="c_bm25_cache_2",
+            tenant_id="tenant_a",
+            document_id="doc_a",
+            chunk_level=ChunkLevel.CHILD,
+            chunk_index=102,
+            section_path="安全设备",
+            content="天融信安全防护墙设备双机热备部署规范",
+            embedding=json.dumps([0.05] * 1536),
+        ),
+    ]
+    async_sqlite_session.add_all(chunks)
+    await async_sqlite_session.commit()
+
+    hybrid_search_engine.clear_bm25_cache()
+    assert hybrid_search_engine.cache_misses == 0
+    assert hybrid_search_engine.cache_hits == 0
+
+    # 首次查询，触发缓存未命中与建索引
+    hits1 = await hybrid_search_engine.search(
+        session=async_sqlite_session,
+        tenant_id="tenant_a",
+        query="华为核心交换机",
+        top_k=3
+    )
+    assert len(hits1) > 0
+    assert hybrid_search_engine.cache_misses == 1
+    assert hybrid_search_engine.cache_hits == 0
+    cached_bm25 = hybrid_search_engine.get_cached_bm25("tenant_a")
+    assert cached_bm25 is not None
+    assert cached_bm25.doc_count > 0
+
+    # 第二次查询相同租户，触发缓存命中
+    hits2 = await hybrid_search_engine.search(
+        session=async_sqlite_session,
+        tenant_id="tenant_a",
+        query="华为核心交换机",
+        top_k=3
+    )
+    assert len(hits2) > 0
+    assert hybrid_search_engine.cache_misses == 1
+    assert hybrid_search_engine.cache_hits == 1
+    assert len(hits1) == len(hits2)
+    assert [h.chunk_id for h in hits1] == [h.chunk_id for h in hits2]
+
+    # 清空特定租户缓存
+    hybrid_search_engine.clear_bm25_cache(tenant_id="tenant_a")
+    assert hybrid_search_engine.get_cached_bm25("tenant_a") is None
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_with_cross_encoder_reranker(
+    mock_embedding_service: EmbeddingService,
+    async_sqlite_session: AsyncSession
+):
+    """12. 验证 HybridSearchEngine 接入 CrossEncoderReranker 实现候选集对齐与精排打分"""
+    import json
+    chunks = [
+        DocumentChunk(
+            id="c_rerank_1",
+            tenant_id="tenant_a",
+            document_id="doc_a",
+            chunk_level=ChunkLevel.CHILD,
+            chunk_index=201,
+            section_path="网络设备",
+            content="华为核心交换机型号为 S6730，配置数量共 2 台，放置于核心机房",
+            embedding=json.dumps([0.1] * 1536),
+        ),
+        DocumentChunk(
+            id="c_rerank_2",
+            tenant_id="tenant_a",
+            document_id="doc_a",
+            chunk_level=ChunkLevel.CHILD,
+            chunk_index=202,
+            section_path="网络设备",
+            content="汇聚层接入交换机华为 S5735，配置数量 8 台",
+            embedding=json.dumps([0.08] * 1536),
+        ),
+    ]
+    async_sqlite_session.add_all(chunks)
+    await async_sqlite_session.commit()
+
+    reranker = CrossEncoderReranker()
+    engine_with_rerank = HybridSearchEngine(
+        embedding_service=mock_embedding_service,
+        reranker=reranker,
+        dense_top_k=10,
+        sparse_top_k=10,
+    )
+
+    hits = await engine_with_rerank.search(
+        session=async_sqlite_session,
+        tenant_id="tenant_a",
+        query="华为核心交换机型号与数量",
+        top_k=3
+    )
+
+    assert len(hits) > 0
+    assert len(hits) <= 3
+    # 验证返回类型为精排结果 RerankResult
+    first_hit = hits[0]
+    assert isinstance(first_hit, RerankResult)
+    assert first_hit.rank == 1
+    assert 0.0 <= first_hit.relevance_score <= 1.0
+    assert first_hit.initial_rrf_score > 0.0
+    # 验证排序按相关度降序
+    for i in range(len(hits) - 1):
+        assert hits[i].relevance_score >= hits[i + 1].relevance_score
+
+
+@pytest.mark.asyncio
+async def test_pgvector_dense_search_fallback(
+    hybrid_search_engine: HybridSearchEngine,
+    async_sqlite_session: AsyncSession
+):
+    """13. 验证在非 PostgreSQL 环境或 pgvector 异常时自动降级至内存余弦计算"""
+    import json
+    chunk = DocumentChunk(
+        id="c_pgv_fallback_1",
+        tenant_id="tenant_a",
+        document_id="doc_a",
+        chunk_level=ChunkLevel.CHILD,
+        chunk_index=301,
+        section_path="降级测试",
+        content="内存稠密向量检索兼容降级内容",
+        embedding=json.dumps([0.1] * 1536),
+    )
+    async_sqlite_session.add(chunk)
+    await async_sqlite_session.commit()
+
+    query_vec = [0.1] * 1536
+    dense_items = await hybrid_search_engine._search_dense(
+        session=async_sqlite_session,
+        tenant_id="tenant_a",
+        query_vector=query_vec,
+        top_k=5
+    )
+    assert isinstance(dense_items, list)
+    assert len(dense_items) > 0
+    assert all(isinstance(item, SearchResultItem) for item in dense_items)
+

@@ -8,12 +8,59 @@
   POST /api/v1/datasets/{id}/chunks（触发解析）、
   GET  /api/v1/datasets/{id}/documents、POST /api/v1/retrieval
 """
+import json
+import logging
+
 import httpx
 
 from app.core.config import settings
 
+_logger = logging.getLogger("app.ragflow.client")
+
 # 上传/解析触发可能排队；检索要等 embedding。与 Dify 客户端同档超时。
 RAGFLOW_TIMEOUT = httpx.Timeout(120.0, connect=10.0)
+
+
+def _map_reference_chunk(c: object) -> object:
+    """引用切片透传：补 document_name（引擎面叫 document_keyword），其余原样不截断。"""
+    if isinstance(c, dict) and not c.get("document_name") and c.get("document_keyword"):
+        c["document_name"] = c["document_keyword"]
+    return c
+
+
+def _find_sse_reference(obj: dict) -> dict | None:
+    choices = obj.get("choices")
+    choice = choices[0] if isinstance(choices, list) and choices else {}
+    ref = (choice.get("delta") or {}).get("reference") or (choice.get("message") or {}).get("reference")
+    return ref if isinstance(ref, dict) else None
+
+
+def _map_sse_reference(obj: dict) -> dict:
+    ref = _find_sse_reference(obj)
+    if ref is None:
+        return obj
+    chunks = ref.get("chunks")
+    if isinstance(chunks, list):
+        ref["chunks"] = [_map_reference_chunk(c) for c in chunks]
+    elif isinstance(chunks, dict):
+        ref["chunks"] = {k: _map_reference_chunk(v) for k, v in chunks.items()}
+    return obj
+
+
+def _reemit_sse_line(line: bytes) -> bytes:
+    """按行重发 SSE：仅含 reference 的 data 帧重序列化（补全字段），其余帧字节原样。"""
+    if not line.startswith(b"data:"):
+        return line + b"\n"
+    payload = line[5:].strip()
+    if not payload or payload == b"[DONE]":
+        return line + b"\n"
+    try:
+        obj = json.loads(payload)
+    except ValueError:
+        return line + b"\n"
+    if not isinstance(obj, dict) or _find_sse_reference(obj) is None:
+        return line + b"\n"
+    return b"data: " + json.dumps(_map_sse_reference(obj), ensure_ascii=False).encode() + b"\n"
 
 
 class RagflowError(Exception):
@@ -106,11 +153,27 @@ class RagflowClient:
             },
         )
 
+    async def update_chat_datasets(self, chat_id: str, dataset_ids: list[str]) -> None:
+        """同步助手库绑定（P0-0：旧助手只绑首库 → 多库检索不全）。"""
+        await self._request(
+            "PUT", f"/api/v1/chats/{chat_id}", json={"dataset_ids": dataset_ids}
+        )
+
     async def ensure_chat(self, dataset_ids: list[str]) -> str:
         """找名叫 portal-assistant 的助手，没有则建；返回 chat_id。
+        复用时若绑定漂移则同步为全量库（同步失败仅告警，沿用旧绑定不炸问答）。
         空库（无已解析文件）时降级为无库助手（纯 LLM 问答）。"""
         for c in await self.list_chats():
             if c.get("name") == "portal-assistant":
+                bound = c.get("dataset_ids")
+                if bound is None or set(bound) != set(dataset_ids):
+                    try:
+                        await self.update_chat_datasets(c["id"], dataset_ids)
+                    except RagflowError as e:
+                        _logger.warning(
+                            "sync portal-assistant datasets failed, keep stale binding: %s",
+                            e.message,
+                        )
                 return c["id"]
         try:
             await self.set_default_chat_model()
@@ -137,7 +200,8 @@ class RagflowClient:
         return body
 
     async def stream_chat(self, chat_id: str, messages: list[dict]):
-        """OpenAI 兼容流式问答（SSE 逐块产出 bytes）。"""
+        """OpenAI 兼容流式问答（SSE 逐块产出 bytes）。
+        按行缓冲重发：reference.chunks 补 document_name 后透传全字段（P0-①）。"""
         async def gen():
             async with self._client.stream(
                 "POST",
@@ -150,8 +214,14 @@ class RagflowClient:
                     text = (await resp.aread()).decode()[:300]
                     yield f'data: {{"error": "{text}"}}\n\n'.encode()
                     return
-                async for line in resp.aiter_bytes():
-                    yield line
+                buf = b""
+                async for raw in resp.aiter_bytes():
+                    buf += raw
+                    *lines, buf = buf.split(b"\n")
+                    for line in lines:
+                        yield _reemit_sse_line(line)
+                if buf:
+                    yield _reemit_sse_line(buf)
         return gen()
 
     # ---- documents ----
@@ -190,13 +260,56 @@ class RagflowClient:
         self, dataset_id: str, document_id: str, page: int = 1, page_size: int = 100
     ) -> list[dict]:
         """v0.26+ page_size 上限 100（超限报错）。"""
+        data = await self.list_chunks_page(dataset_id, document_id, page=page, page_size=page_size)
+        return data.get("chunks") or []
+
+    async def list_chunks_page(
+        self, dataset_id: str, document_id: str, keywords: str = "",
+        page: int = 1, page_size: int = 20,
+    ) -> dict:
+        """切片分页列表：返回引擎 data（chunks/total），供网关端点透传。"""
+        params: dict = {"page": page, "page_size": min(page_size, 100)}
+        if keywords:
+            params["keywords"] = keywords
         body = await self._request(
             "GET",
             f"/api/v1/datasets/{dataset_id}/documents/{document_id}/chunks",
-            params={"page": page, "page_size": min(page_size, 100)},
+            params=params,
+        )
+        return body.get("data") or {}
+
+    async def get_chunk(self, dataset_id: str, document_id: str, chunk_id: str) -> dict:
+        body = await self._request(
+            "GET",
+            f"/api/v1/datasets/{dataset_id}/documents/{document_id}/chunks/{chunk_id}",
         )
         data = body.get("data") or {}
-        return data.get("chunks", []) if isinstance(data, dict) else []
+        # 某些版本把单条包在 chunks 里：统一拆出
+        if isinstance(data, dict) and "id" not in data:
+            inner = data.get("chunks")
+            if isinstance(inner, list) and inner:
+                return inner[0]
+        return data
+
+    async def update_chunk(
+        self, dataset_id: str, document_id: str, chunk_id: str, fields: dict
+    ) -> None:
+        """切片纠错（v0.27 规范动词 PATCH；PUT 为弃用别名）。"""
+        await self._request(
+            "PATCH",
+            f"/api/v1/datasets/{dataset_id}/documents/{document_id}/chunks/{chunk_id}",
+            json=fields,
+        )
+
+    async def delete_chunks(
+        self, dataset_id: str, document_id: str, chunk_ids: list[str]
+    ) -> None:
+        """引擎删除为批量端点（body chunk_ids）；网关单条语义在此收敛。"""
+        await self._request(
+            "DELETE",
+            f"/api/v1/datasets/{dataset_id}/documents/{document_id}/chunks",
+            json={"chunk_ids": chunk_ids},
+        )
 
     async def update_document_meta(
         self, dataset_id: str, document_id: str, meta_fields: dict
@@ -210,17 +323,33 @@ class RagflowClient:
     # ---- retrieval ----
 
     async def retrieve(
-        self, question: str, dataset_ids: list[str], top_k: int = 5,
+        self,
+        question: str,
+        dataset_ids: list[str],
+        page_size: int = 10,
+        similarity_threshold: float | None = None,
+        vector_similarity_weight: float | None = None,
+        rerank_id: str | None = None,
+        keyword: bool | None = None,
+        highlight: bool | None = None,
         metadata_condition: dict | None = None,
         document_ids: list[str] | None = None,
     ) -> dict:
-        """返回 data（chunks 在 data.chunks[]，含 content/similarity）。
+        """返回 data（chunks 在 data.chunks[]，全字段由路由层映射）。
+        page_size 为网关自有 top_n 截断；RAGFlow top_k/knn_top_k 已弃用，不透传。
         document_ids：服务端推导的可见白名单（#29 ACL 预过滤通道）；
         None = 不过滤（方案 A：部门内全员可见，隔离已在租户账号层）。"""
-        body: dict = {"question": question, "dataset_ids": dataset_ids, "page_size": top_k}
-        if metadata_condition:
-            body["metadata_condition"] = metadata_condition
-        if document_ids:
-            body["document_ids"] = document_ids
+        body: dict = {"question": question, "dataset_ids": dataset_ids, "page_size": page_size}
+        for k, v in {
+            "similarity_threshold": similarity_threshold,
+            "vector_similarity_weight": vector_similarity_weight,
+            "rerank_id": rerank_id,
+            "keyword": keyword,
+            "highlight": highlight,
+            "metadata_condition": metadata_condition,
+            "document_ids": document_ids,
+        }.items():
+            if v is not None:
+                body[k] = v
         payload = await self._request("POST", "/api/v1/retrieval", json=body)
         return payload.get("data") or {}

@@ -189,3 +189,21 @@
 
 ## 前端观感
 - 思考过程面板与正文统一走打字机平滑（useTypewriter）
+
+---
+
+# v10 增补（RAG P0 · 检索参数化 + 切片通道 + 引用溯源）
+
+## 端点（prefix /api/rag）
+| 端点 | 权限 | 说明 |
+|---|---|---|
+| POST /api/rag/retrieval | 登录 | 请求体新增可选：`similarity_threshold`(0-1)、`vector_similarity_weight`(0-1)、`rerank_id`、`keyword`、`highlight`、`top_n`(默认 10，网关自有截断→引擎 `page_size`)；**不再透传** RAGFlow 已弃用的 `top_k`/`knn_top_k`。响应 chunks 每项：`id/content/document_id/document_keyword/dataset_id/similarity/term_similarity/vector_similarity/positions/highlight` |
+| GET /api/rag/datasets/{ds}/documents/{doc}/chunks?keywords=&page=&page_size= | 登录 | 切片分页（page_size 默认 20 上限 100）→ `{"chunks":[{id,content,document_id,available,important_keywords,positions}],"total"}` |
+| GET /api/rag/datasets/{ds}/documents/{doc}/chunks/{cid} | 登录 | 单切片同形状 |
+| PATCH /api/rag/datasets/{ds}/documents/{doc}/chunks/{cid} `{content?,available?,important_keywords?}` | PLATFORM_ADMIN | 切片手动纠错；入 rag 审计 `chunk.update` |
+| DELETE /api/rag/datasets/{ds}/documents/{doc}/chunks/{cid} | PLATFORM_ADMIN | 删切片（引擎批量端点收敛为单条语义）；`chunk.delete` |
+| POST /api/rag/datasets/{ds}/documents/{doc}/parse | 登录 | 重试解析（口径对齐上传）→ 202；`doc.parse` |
+
+## 语义变更
+- **P0-0 全量库绑定**：portal-assistant 绑定租户全量库（原只绑首库 → 多库部门问答检索不全）。复用已有 assistant 时若绑定漂移自动 PUT 同步；同步失败仅告警并沿用旧绑定，不阻断问答
+- **P0-① SSE 引用全字段**：POST /api/rag/chat/completions 的 `reference.chunks` 每项透传全字段并补 `document_name`（= 引擎 `document_keyword`），不做任何截断；无 reference 的帧字节原样透传

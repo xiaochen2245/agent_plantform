@@ -24,13 +24,17 @@ def fake_ragflow(
 
     def handler(request: httpx.Request) -> httpx.Response:
         if captured is not None:
-            captured.append(
-                {
-                    "method": request.method,
-                    "url": str(request.url),
-                    "auth": request.headers.get("authorization"),
-                }
-            )
+            entry = {
+                "method": request.method,
+                "url": str(request.url),
+                "auth": request.headers.get("authorization"),
+            }
+            if request.content and "json" in request.headers.get("content-type", ""):
+                try:
+                    entry["body"] = json.loads(request.content.decode())
+                except ValueError:
+                    pass
+            captured.append(entry)
         if status != 200:
             return httpx.Response(status, json=body or {"code": 102, "message": "You don't own the dataset x."})
         # 分流默认响应
@@ -38,6 +42,21 @@ def fake_ragflow(
             return httpx.Response(200, json={"code": 0, "data": {"chunks": [
                 {"content": "评分表内容", "similarity": 0.52, "document_id": "d1"}
             ]}})
+        if "/chunks/" in request.url.path:
+            if request.method == "GET":
+                return httpx.Response(200, json={"code": 0, "data": {
+                    "id": "c-1", "content": "切片内容", "document_id": "doc-1",
+                    "available": True, "important_keywords": ["埋深"], "positions": [[1, 2]],
+                }})
+            return httpx.Response(200, json={"code": 0})  # PATCH/DELETE 单切片
+        if request.url.path.endswith("/chunks") and request.method == "GET":
+            return httpx.Response(200, json={"code": 0, "data": {
+                "chunks": [
+                    {"id": "c-1", "content": "切片1", "document_id": "doc-1",
+                     "available": True, "important_keywords": [], "positions": [[1]]}
+                ],
+                "total": 1,
+            }})
         if "/documents" in request.url.path:
             if request.method == "POST":  # 上传
                 return httpx.Response(200, json={"code": 0, "data": [
@@ -88,7 +107,7 @@ async def test_list_and_retrieval_as_user(client: AsyncClient):
     r = await client.get("/api/rag/datasets")
     assert r.status_code == 200
     r = await client.post("/api/rag/retrieval", json={
-        "question": "分值", "dataset_ids": ["ds-1"], "top_k": 3,
+        "question": "分值", "dataset_ids": ["ds-1"], "top_n": 3,
     })
     assert r.status_code == 200
     assert r.json()["chunks"][0]["similarity"] == pytest.approx(0.52)
@@ -300,9 +319,17 @@ async def test_retrieval_metadata_condition_passthrough(client: AsyncClient):
 from app.ragflow.client import RagflowClient
 
 
-def fake_full_ragflow(captured: list) -> RagflowClient:
+def fake_full_ragflow(captured: list, datasets: list[dict] | None = None) -> RagflowClient:
     def handler(request: httpx.Request) -> httpx.Response:
-        captured.append({"method": request.method, "url": str(request.url)})
+        entry = {"method": request.method, "url": str(request.url)}
+        if request.content and "json" in request.headers.get("content-type", ""):
+            try:
+                entry["body"] = json.loads(request.content.decode())
+            except ValueError:
+                pass
+        captured.append(entry)
+        if request.url.path.endswith("/datasets") and request.method == "GET":
+            return httpx.Response(200, json={"code": 0, "data": datasets or []})
         if request.url.path.endswith("/chats") and request.method == "GET":
             return httpx.Response(200, json={"code": 0, "data": {"chats": []}})
         if request.url.path.endswith("/chats") and request.method == "POST":
@@ -576,3 +603,176 @@ async def test_retrieval_rejects_client_document_ids(client: AsyncClient):
         "question": "经验", "dataset_ids": ["ds-1"], "document_ids": ["hack"]})
     assert r.status_code == 200
     assert "document_ids" not in captured[-1], "策略为 None 时不得透传任何 document_ids"
+
+
+# ---- P0：检索参数化 / 切片通道 / 全量库绑定 / SSE 引用透传 ----
+
+
+async def test_retrieval_params_passthrough(client: AsyncClient):
+    """P0-②：检索台参数透传 + top_n→page_size 映射；弃用的 top_k 不得出现。"""
+    captured: list = []
+
+    def handler(request):
+        captured.append(json.loads(request.content.decode()))
+        return httpx.Response(200, json={"code": 0, "data": {"chunks": [{
+            "id": "c1", "content": "命中切片", "document_id": "d1",
+            "document_keyword": "评分表.docx", "dataset_id": "ds-1",
+            "similarity": 0.9, "term_similarity": 0.8, "vector_similarity": 0.7,
+            "positions": [[1, 2]], "highlight": "<em>命中</em>切片",
+        }]}})
+
+    fake = fake_ragflow()
+    fake._client._transport = httpx.MockTransport(handler)
+    _override(fake)
+    await login(client)
+    r = await client.post("/api/rag/retrieval", json={
+        "question": "埋深", "dataset_ids": ["ds-1"],
+        "top_n": 7, "similarity_threshold": 0.3, "vector_similarity_weight": 0.6,
+        "rerank_id": "builtin", "keyword": True, "highlight": True,
+    })
+    assert r.status_code == 200, r.text
+    body = captured[-1]
+    assert body["page_size"] == 7, "top_n 必须映射为引擎 page_size"
+    assert "top_k" not in body and "knn_top_k" not in body, "弃用参数不得透传"
+    assert body["similarity_threshold"] == 0.3
+    assert body["vector_similarity_weight"] == 0.6
+    assert body["rerank_id"] == "builtin"
+    assert body["keyword"] is True and body["highlight"] is True
+    # 响应全字段（引用溯源依赖）
+    c = r.json()["chunks"][0]
+    assert c["document_keyword"] == "评分表.docx" and c["term_similarity"] == 0.8
+    assert c["vector_similarity"] == 0.7 and c["positions"] == [[1, 2]]
+    assert c["highlight"] == "<em>命中</em>切片" and c["id"] == "c1"
+
+
+async def test_chat_assistant_binds_all_datasets(client: AsyncClient):
+    """P0-0：新建 assistant 必须绑定全量库（原 ids[:1] 只绑首库）。"""
+    captured: list = []
+    _override(fake_full_ragflow(captured, datasets=[
+        {"id": "ds-1", "name": "库1"}, {"id": "ds-2", "name": "库2"},
+    ]))
+    await login(client)
+    r = await client.get("/api/rag/chat/assistant")
+    assert r.status_code == 200 and r.json()["chat_id"] == "chat-9"
+    create = next(c for c in captured if c["method"] == "POST" and c["url"].endswith("/chats"))
+    assert set(create["body"]["dataset_ids"]) == {"ds-1", "ds-2"}
+
+
+async def test_chat_assistant_syncs_stale_binding(client: AsyncClient):
+    """P0-0：已有 assistant 绑定漂移（只绑首库）→ 复用时 PUT 同步为全量。"""
+    captured: list = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append({"method": request.method, "url": str(request.url),
+                         "body": json.loads(request.content.decode()) if request.content else None})
+        if request.url.path.endswith("/datasets") and request.method == "GET":
+            return httpx.Response(200, json={"code": 0, "data": [
+                {"id": "ds-1", "name": "库1"}, {"id": "ds-2", "name": "库2"}]})
+        if request.url.path.endswith("/chats") and request.method == "GET":
+            return httpx.Response(200, json={"code": 0, "data": {"chats": [
+                {"id": "chat-1", "name": "portal-assistant", "dataset_ids": ["ds-1"]}]}})
+        return httpx.Response(200, json={"code": 0, "data": []})
+
+    _override(RagflowClient(base_url="http://f", api_key="k",
+                            transport=httpx.MockTransport(handler)))
+    await login(client)
+    r = await client.get("/api/rag/chat/assistant")
+    assert r.status_code == 200 and r.json()["chat_id"] == "chat-1"
+    put = next(c for c in captured if c["method"] == "PUT" and "/chats/" in c["url"])
+    assert set(put["body"]["dataset_ids"]) == {"ds-1", "ds-2"}
+
+
+async def test_chat_completions_sse_reference_full_fields(client: AsyncClient):
+    """P0-①：SSE 引用全字段透传 + document_keyword→document_name 映射，不截断。"""
+    long_content = "审查意见：管道埋深未考虑冻土线" * 10
+    delta_line = 'data: {"choices":[{"delta":{"content":"答案增量"}}]}'.encode()
+    ref_chunk = json.dumps({"content": long_content, "document_id": "d1",
+                            "document_keyword": "评分表.docx", "dataset_id": "ds-1",
+                            "similarity": 0.91, "positions": [[3, 1]]}, ensure_ascii=False).encode()
+    ref_line = b'data: {"choices":[{"message":{"reference":{"chunks":[' + ref_chunk + b']}}}]}\n\n'
+    sse = delta_line + b'\n\n' + ref_line + b'data: [DONE]\n\n'
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/datasets") and request.method == "GET":
+            return httpx.Response(200, json={"code": 0, "data": [{"id": "ds-1", "name": "库1"}]})
+        if request.url.path.endswith("/chats") and request.method == "GET":
+            return httpx.Response(200, json={"code": 0, "data": {"chats": [
+                {"id": "chat-1", "name": "portal-assistant", "dataset_ids": ["ds-1"]}]}})
+        if "/openai/" in request.url.path:
+            return httpx.Response(200, content=sse)
+        return httpx.Response(200, json={"code": 0, "data": []})
+
+    _override(RagflowClient(base_url="http://f", api_key="k",
+                            transport=httpx.MockTransport(handler)))
+    await login(client)
+    async with client.stream("POST", "/api/rag/chat/completions",
+                             json={"messages": [{"role": "user", "content": "管道埋深要求？"}]}) as r:
+        assert r.status_code == 200
+        text = (await r.aread()).decode()
+    # 增量帧原样
+    assert '"content":"答案增量"' in text
+    # 引用帧：document_name 已映射、全文不截断、得分/位置透传
+    ref_line = next(l for l in text.split("\n") if "reference" in l)
+    ref = json.loads(ref_line[5:])
+    chunk = ref["choices"][0]["message"]["reference"]["chunks"][0]
+    assert chunk["document_name"] == "评分表.docx"
+    assert chunk["content"] == long_content
+    assert chunk["similarity"] == 0.91 and chunk["positions"] == [[3, 1]]
+    assert "data: [DONE]" in text
+
+
+async def test_chunk_endpoints_authz_and_audit(client: AsyncClient):
+    """P0-③：切片 list/get 全员；patch/delete 仅 ADMIN；写操作入审计。"""
+    captured: list = []
+    fake = fake_ragflow(captured)
+    _override(fake)
+    await login(client)  # 种子管理员
+
+    r = await client.get("/api/rag/datasets/ds-1/documents/doc-1/chunks",
+                         params={"keywords": "埋深", "page_size": 50})
+    assert r.status_code == 200, r.text
+    assert r.json()["chunks"][0]["id"] == "c-1" and r.json()["total"] == 1
+
+    r = await client.get("/api/rag/datasets/ds-1/documents/doc-1/chunks/c-1")
+    assert r.status_code == 200 and r.json()["important_keywords"] == ["埋深"]
+
+    r = await client.patch("/api/rag/datasets/ds-1/documents/doc-1/chunks/c-1",
+                           json={"content": "修正后的切片", "available": True})
+    assert r.status_code == 200, r.text
+    patch_calls = [c for c in captured if c["method"] == "PATCH" and "/chunks/c-1" in c["url"]]
+    assert patch_calls and patch_calls[0]["body"]["content"] == "修正后的切片"
+
+    r = await client.delete("/api/rag/datasets/ds-1/documents/doc-1/chunks/c-1")
+    assert r.status_code == 204
+    delete_calls = [c for c in captured if c["method"] == "DELETE" and "/chunks" in c["url"]]
+    assert delete_calls and delete_calls[0]["body"]["chunk_ids"] == ["c-1"]
+
+    # 审计行
+    r = await client.get("/api/rag/audit")
+    actions = [l["action"] for l in r.json()["logs"]]
+    assert "chunk.update" in actions and "chunk.delete" in actions
+
+    # 非 admin：读可、写拒
+    await mkuser("chunkreader@company.com", role_codes=("USER",))
+    await login(client, email="chunkreader@company.com", password="guest-pass-123")
+    assert (await client.get("/api/rag/datasets/ds-1/documents/doc-1/chunks")).status_code == 200
+    assert (await client.patch("/api/rag/datasets/ds-1/documents/doc-1/chunks/c-1",
+                               json={"content": "x"})).status_code == 403
+    assert (await client.delete("/api/rag/datasets/ds-1/documents/doc-1/chunks/c-1")).status_code == 403
+
+
+async def test_parse_document_endpoint(client: AsyncClient):
+    """P0-③：重解析触发（登录用户，对齐上传口径）+ 审计。"""
+    captured: list = []
+    _override(fake_ragflow(captured))
+    await mkuser("parseuser@company.com", role_codes=("USER",))
+    await login(client, email="parseuser@company.com", password="guest-pass-123")
+    r = await client.post("/api/rag/datasets/ds-1/documents/doc-1/parse")
+    assert r.status_code == 202, r.text
+    parse_calls = [c for c in captured
+                   if c["method"] == "POST" and c["url"].endswith("/datasets/ds-1/chunks")]
+    assert parse_calls and parse_calls[0]["body"]["document_ids"] == ["doc-1"]
+    # 普通用户的写审计也入流水（admin 才能查，换管理员查）
+    await login(client)
+    r = await client.get("/api/rag/audit")
+    assert "doc.parse" in [l["action"] for l in r.json()["logs"]]

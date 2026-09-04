@@ -522,3 +522,57 @@ async def test_chat_session_isolation_and_validation(client: AsyncClient):
     sid2 = r.json()["id"]
     assert (await client.put(f"/api/rag/chat/sessions/{sid2}/messages",
                              json={"messages": [{"role": "system", "content": "x"}]})).status_code == 422
+
+
+# ---- #29 document_ids 白名单通道：透传 + schema 拒收 + 策略缝 ----
+
+
+async def test_retrieval_document_ids_passthrough(client: AsyncClient, monkeypatch):
+    """策略返回白名单 → 必须透传 RAGFlow（capture 断言）。"""
+    import app.ragflow.policy as policy
+    captured: list = []
+
+    def handler(request):
+        import json as _j
+        captured.append(_j.loads(request.content.decode()))
+        return httpx.Response(200, json={"code": 0, "data": {"chunks": []}})
+
+    fake = fake_ragflow()
+    fake._client._transport = httpx.MockTransport(handler)
+    _override(fake)
+    await login(client)
+
+    async def fake_visible(db, user, dataset_ids):
+        return ["doc-a", "doc-b"]
+
+    monkeypatch.setattr(policy, "visible_document_ids", fake_visible)
+    # router 持有直接引用，需一并替换（缝在 policy 模块，路由 import 名替换）
+    import app.ragflow.router as rag_router
+    monkeypatch.setattr(rag_router, "visible_document_ids", fake_visible, raising=False)
+
+    r = await client.post("/api/rag/retrieval", json={
+        "question": "经验", "dataset_ids": ["ds-1"], "document_ids": ["hack"]})
+    assert r.status_code == 200
+    body = captured[-1]
+    assert body.get("document_ids") == ["doc-a", "doc-b"], "服务端白名单必须透传"
+    assert "document_ids" not in str(body.get("document_ids")) or body["document_ids"] != ["hack"]
+
+
+async def test_retrieval_rejects_client_document_ids(client: AsyncClient):
+    """schema 不收客户端 document_ids（可传=越权面）——多余字段被忽略且不透传。"""
+    captured: list = []
+
+    def handler(request):
+        import json as _j
+        captured.append(_j.loads(request.content.decode()))
+        return httpx.Response(200, json={"code": 0, "data": {"chunks": []}})
+
+    fake = fake_ragflow()
+    fake._client._transport = httpx.MockTransport(handler)
+    _override(fake)
+    await login(client)
+    # pydantic 默认忽略额外字段 → 请求成功但 body 里绝不能出现客户端注入的 document_ids
+    r = await client.post("/api/rag/retrieval", json={
+        "question": "经验", "dataset_ids": ["ds-1"], "document_ids": ["hack"]})
+    assert r.status_code == 200
+    assert "document_ids" not in captured[-1], "策略为 None 时不得透传任何 document_ids"

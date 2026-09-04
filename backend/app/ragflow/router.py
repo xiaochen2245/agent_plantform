@@ -29,6 +29,7 @@ from app.ragflow.autotag import spawn_autotag
 from app.ragflow.client import RagflowClient, RagflowError
 from app.ragflow.deps import get_ragflow
 from app.ragflow.parsing import route_for
+from app.ragflow.policy import visible_document_ids
 from app.ragflow.onboarding import ProvisionError, RagflowProvisioner
 from app.ragflow.tagging import Tagger
 from app.schemas.rag import (
@@ -169,15 +170,21 @@ async def list_documents(
 async def retrieval(
     payload: RagRetrievalQuery,
     user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
     client: RagflowClient = Depends(get_ragflow),
 ) -> dict:
+    """检索（#29）：document_ids 白名单由服务端推导，客户端不可传。
+    当前策略方案 A（部门内全员可见）→ 不过滤；owner 拍细粒度后仅改
+    visible_document_ids 实现，通道与路由不变。"""
     _require_ragflow(client)
+    doc_ids = await visible_document_ids(db, user, payload.dataset_ids)
     extra: dict = {}
     if payload.metadata_condition:
         extra["metadata_condition"] = payload.metadata_condition.model_dump()
     try:
         data = await client.retrieve(
-            payload.question, payload.dataset_ids, payload.top_k, **extra
+            payload.question, payload.dataset_ids, payload.top_k,
+            document_ids=doc_ids, **extra
         )
     except RagflowError as e:
         raise _map_upstream(e) from e

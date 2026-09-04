@@ -212,10 +212,15 @@ class RagflowClient:
     async def retrieve(
         self, question: str, dataset_ids: list[str], top_k: int = 5,
         metadata_condition: dict | None = None,
+        document_ids: list[str] | None = None,
     ) -> dict:
-        """返回 data（chunks 在 data.chunks[]，含 content/similarity）。"""
+        """返回 data（chunks 在 data.chunks[]，含 content/similarity）。
+        document_ids：服务端推导的可见白名单（#29 ACL 预过滤通道）；
+        None = 不过滤（方案 A：部门内全员可见，隔离已在租户账号层）。"""
         body: dict = {"question": question, "dataset_ids": dataset_ids, "page_size": top_k}
         if metadata_condition:
             body["metadata_condition"] = metadata_condition
+        if document_ids:
+            body["document_ids"] = document_ids
         payload = await self._request("POST", "/api/v1/retrieval", json=body)
         return payload.get("data") or {}

@@ -25,6 +25,7 @@ from app.files.cleanup import sweep_expired_uploads
 from app.files.router import router as files_router
 from app.kb.router import router as kb_router
 from app.models.app import App
+from app.api.v1.router import api_v1_router
 
 _logger = logging.getLogger("app.main")
 
@@ -90,6 +91,7 @@ app.include_router(conversations_router)
 app.include_router(depts_router)
 app.include_router(roles_router)
 app.include_router(admin_router)
+app.include_router(api_v1_router, prefix="/api/v1")
 
 
 @app.get("/api/health")

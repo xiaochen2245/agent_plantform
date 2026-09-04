@@ -6,6 +6,7 @@ os.environ["JWT_SECRET"] = "test-only-jwt-secret-32-bytes-minimum-padding!"
 os.environ["ENCRYPTION_KEY"] = "test-only-encryption-key"
 os.environ["ALLOWED_ORIGINS"] = "http://localhost:5173,http://localhost:8000"
 os.environ["DEBUG"] = "true"
+os.environ["CELERY_TASK_ALWAYS_EAGER"] = "true"
 # 契约 v4：上传卷指向临时目录，避免测试污染真实 backend/uploads
 import tempfile as _tempfile
 

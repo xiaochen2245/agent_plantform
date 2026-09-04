@@ -270,9 +270,14 @@ class EmbeddingService:
             batch_vecs = await self.provider.embed_documents(batch_texts)
             all_vectors.extend(batch_vecs)
 
+        from app.core.config import settings
+        is_sqlite = (
+            "sqlite" in getattr(settings, "DATABASE_URL", "").lower()
+            or "sqlite" in os.getenv("DATABASE_URL", "").lower()
+        )
         # 填充回实体
         for chk, vec in zip(target_chunks, all_vectors):
-            if HAS_PGVECTOR:
+            if HAS_PGVECTOR and not is_sqlite:
                 # 在真实 PostgreSQL + pgvector 下直接存 List[float]
                 chk.embedding = vec
             else:

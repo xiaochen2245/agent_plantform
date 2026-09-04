@@ -37,6 +37,10 @@ class PurePythonStateCheckpointer:
         async with self._lock:
             self._storage[thread_id] = dict(state)
 
+    def get(self, thread_id: str) -> Optional[Dict[str, Any]]:
+        state = self._storage.get(thread_id)
+        return dict(state) if state is not None else None
+
     async def alist(self) -> List[str]:
         async with self._lock:
             return list(self._storage.keys())

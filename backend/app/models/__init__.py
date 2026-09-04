@@ -9,6 +9,21 @@ from app.models.role import Role, user_roles
 from app.models.upload_file import UploadFile
 from app.models.user import User
 
+from app.models.audit_rag import (
+    AuditTask,
+    ChunkLevel,
+    DeviationType,
+    Document,
+    DocumentChunk,
+    HistoricalAuditRisk,
+    ReviewResult,
+    SeverityLevel,
+    TaskStatus,
+    TaskType,
+    Tenant,
+    TenantStatus,
+)
+
 __all__ = [
     "App",
     "AppAuthorization",
@@ -20,4 +35,16 @@ __all__ = [
     "UploadFile",
     "User",
     "user_roles",
+    "Tenant",
+    "TenantStatus",
+    "Document",
+    "DocumentChunk",
+    "ChunkLevel",
+    "AuditTask",
+    "TaskType",
+    "TaskStatus",
+    "ReviewResult",
+    "DeviationType",
+    "SeverityLevel",
+    "HistoricalAuditRisk",
 ]

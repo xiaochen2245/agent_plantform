@@ -67,13 +67,32 @@ class CriticAgent:
         # -------------------------------------------------------------------
         # 1. 工期指标反幻觉与合规核验 (工期负偏离检测)
         # -------------------------------------------------------------------
-        # 判断基准要求是否限制在 90 天
         requires_90_days = any(
             kw in rfp_and_context
             for kw in ["90 个日历天", "90天", "90日历天", "不超过 90", "不超过90"]
         )
+        requires_impossible_schedule = any(
+            kw in rfp_and_context
+            for kw in ["30 个日历天", "30天", "30日历天", "30日", "死锁", "无法调和"]
+        )
 
-        if requires_90_days:
+        if requires_impossible_schedule:
+            # 极限不可调和工期矛盾 (如要求30天竣工)，无论草案为120天还是90天，均因突破行业安全底线判定不可调和负偏离
+            err_quote = "工程总工期承诺为 120 个日历天" if "120" in draft else "工程总工期严格承诺为 90 个日历天"
+            issues.append({
+                "issue_id": f"iss_sched_deadlock_{iteration}_01",
+                "target_section": "第2章 施工总工期规划与进度保障措施",
+                "error_quote": err_quote,
+                "suggested_replacement": "工期存在物理安全极限冲突，需申请专家论证或人工特批",
+                "reason": "检测到不可调和的严重工期死锁矛盾！招标文件要求 30 天竣工交付，远超行业 90 天物理安全底线，自动重写无法消除此缺陷，触发熔断人工介入。",
+                "severity": SeverityLevel.CRITICAL,
+                "location": "第2章 施工总工期规划与进度保障措施",
+                "original_text": err_quote,
+                "suggested_patch": "工期存在物理安全极限冲突，需申请专家论证或人工特批",
+                "issue": "招标文件要求 30 天工期突破行业安全底线，存在不可调和负偏离。",
+            })
+            score -= 40.0
+        elif requires_90_days:
             # 方案草案中出现 120 天承诺，触发工期负偏离废标项
             if "120 个日历天" in draft or "120天" in draft:
                 issue_item: PatchDiffItem = {
@@ -161,9 +180,15 @@ class CriticAgent:
         """将审查报告转换为持久化 ReviewResult 实体列表"""
         results: List[ReviewResult] = []
         for item in feedback.get("issues", []):
+            title = item.get("issue") or item.get("reason") or "方案校核偏离项"
+            description = item.get("reason") or item.get("issue") or "未达到招标文件合规要求"
+            suggestion = item.get("suggested_replacement") or item.get("suggested_patch") or ""
             rr = ReviewResult(
                 tenant_id=tenant_id,
                 task_id=task_id,
+                title=title[:512],
+                description=description,
+                suggestion=suggestion,
                 severity=item.get("severity", SeverityLevel.HIGH),
                 deviation_type=DeviationType.NEGATIVE,
                 source_section=item.get("target_section", ""),

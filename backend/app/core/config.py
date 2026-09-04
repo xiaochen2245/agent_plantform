@@ -78,6 +78,11 @@ class Settings(BaseSettings):
     SEED_ADMIN_EMAIL: str = "admin@company.com"
     SEED_ADMIN_PASSWORD: str = "admin123"
 
+    # Celery 异步任务队列配置
+    CELERY_BROKER_URL: str = "redis://127.0.0.1:6379/0"
+    CELERY_RESULT_BACKEND: str = "redis://127.0.0.1:6379/0"
+    CELERY_TASK_ALWAYS_EAGER: bool = False
+
     @property
     def allowed_origins_list(self) -> list[str]:
         return [o.strip() for o in self.ALLOWED_ORIGINS.split(",") if o.strip()]

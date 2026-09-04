@@ -19,6 +19,8 @@ dependencies = [
     "python-multipart>=0.0.32",
     "asyncpg>=0.31.0",
     "pgvector>=0.3.0",
+    "celery>=5.3.0",
+    "redis>=5.0.0",
 ]
 
 [dependency-groups]

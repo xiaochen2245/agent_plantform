@@ -1,0 +1,8 @@
+{
+  "total": 100,
+  "items": [
+    {"seq": "1", "item": "投标报价", "score": 30, "criteria": "以基准价计算得分", "category": "价格"},
+    {"seq": "2.1", "item": "技术方案", "score": 40, "criteria": "方案完整性", "category": "技术"},
+    {"seq": "2.2", "item": "项目经理业绩", "score": 30, "criteria": "近5年同类业绩每项10分", "category": "技术"}
+  ]
+}

@@ -44,15 +44,16 @@ def fake_ragflow(
             ]}})
         if "/chunks/" in request.url.path:
             if request.method == "GET":
+                # 真实引擎单条字段是 content_with_weight（v0.27.1 实测），验证网关映射
                 return httpx.Response(200, json={"code": 0, "data": {
-                    "id": "c-1", "content": "切片内容", "document_id": "doc-1",
+                    "id": "c-1", "content_with_weight": "切片内容", "document_id": "doc-1",
                     "available": True, "important_keywords": ["埋深"], "positions": [[1, 2]],
                 }})
             return httpx.Response(200, json={"code": 0})  # PATCH/DELETE 单切片
         if request.url.path.endswith("/chunks") and request.method == "GET":
             return httpx.Response(200, json={"code": 0, "data": {
                 "chunks": [
-                    {"id": "c-1", "content": "切片1", "document_id": "doc-1",
+                    {"id": "c-1", "content_with_weight": "切片1", "document_id": "doc-1",
                      "available": True, "important_keywords": [], "positions": [[1]]}
                 ],
                 "total": 1,

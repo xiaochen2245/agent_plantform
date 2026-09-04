@@ -100,7 +100,8 @@ def _chunk_brief(c: dict) -> dict:
     """切片列表/单条网关形状（P0-③：切片查看与纠错）。"""
     return {
         "id": c.get("id"),
-        "content": c.get("content"),
+        # 引擎 chunk 列表/单条的字段名是 content_with_weight（SSE 引用路径同此回退）
+        "content": c.get("content") or c.get("content_with_weight"),
         "document_id": c.get("document_id"),
         "available": c.get("available"),
         "important_keywords": c.get("important_keywords"),

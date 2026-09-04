@@ -21,10 +21,23 @@ class MetadataCondition(BaseModel):
 class RagRetrievalQuery(BaseModel):
     question: str = Field(min_length=1, max_length=2048)
     dataset_ids: list[str] = Field(min_length=1, max_length=16)
-    top_k: int = Field(default=5, ge=1, le=50)
+    # 网关自有截断：映射引擎 page_size（RAGFlow top_k 已弃用，不透传）
+    top_n: int = Field(default=10, ge=1, le=100)
+    similarity_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+    vector_similarity_weight: float | None = Field(default=None, ge=0.0, le=1.0)
+    rerank_id: str | None = Field(default=None, max_length=128)
+    keyword: bool | None = None
+    highlight: bool | None = None
     # 租内过滤（部门/专业/项目维度），透传 RAGFlow metadata_condition；
     # 租户隔离在账号层，此处仅收窄范围不放宽
     metadata_condition: MetadataCondition | None = None
+
+
+class RagChunkUpdate(BaseModel):
+    """切片纠错（PLATFORM_ADMIN）：content 为全量替换，available 启停。"""
+    content: str | None = Field(default=None, min_length=1, max_length=32768)
+    available: bool | None = None
+    important_keywords: list[str] | None = Field(default=None, max_length=32)
 
 
 class RagBindingCreate(BaseModel):

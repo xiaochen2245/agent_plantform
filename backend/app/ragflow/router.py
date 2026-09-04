@@ -35,6 +35,7 @@ from app.ragflow.tagging import Tagger
 from app.schemas.rag import (
     MetadataCondition,
     RagBindingCreate,
+    RagChunkUpdate,
     RagDatasetCreate,
     RagRetrievalQuery,
     RagSessionCreate,
@@ -77,6 +78,34 @@ def _map_upstream(e: RagflowError) -> HTTPException:
     ):
         return HTTPException(status.HTTP_404_NOT_FOUND, "dataset not found")
     return HTTPException(status.HTTP_502_BAD_GATEWAY, f"ragflow upstream: {e.message[:200]}")
+
+
+def _retrieval_chunk(c: dict) -> dict:
+    """检索结果全字段透传（P0-①：引用溯源需文档名/得分/位置）。"""
+    return {
+        "id": c.get("id"),
+        "content": c.get("content") or c.get("content_with_weight"),
+        "document_id": c.get("document_id"),
+        "document_keyword": c.get("document_keyword"),
+        "dataset_id": c.get("dataset_id"),
+        "similarity": c.get("similarity"),
+        "term_similarity": c.get("term_similarity"),
+        "vector_similarity": c.get("vector_similarity"),
+        "positions": c.get("positions"),
+        "highlight": c.get("highlight"),
+    }
+
+
+def _chunk_brief(c: dict) -> dict:
+    """切片列表/单条网关形状（P0-③：切片查看与纠错）。"""
+    return {
+        "id": c.get("id"),
+        "content": c.get("content"),
+        "document_id": c.get("document_id"),
+        "available": c.get("available"),
+        "important_keywords": c.get("important_keywords"),
+        "positions": c.get("positions"),
+    }
 
 
 @router.get("/datasets")
@@ -174,6 +203,8 @@ async def retrieval(
     client: RagflowClient = Depends(get_ragflow),
 ) -> dict:
     """检索（#29）：document_ids 白名单由服务端推导，客户端不可传。
+    P0-②：检索台参数化——阈值/向量权重/重排/关键词/高亮透传，top_n 为
+    网关自有截断（映射引擎 page_size，不透传已弃用的 top_k）。
     当前策略方案 A（部门内全员可见）→ 不过滤；owner 拍细粒度后仅改
     visible_document_ids 实现，通道与路由不变。"""
     _require_ragflow(client)
@@ -183,22 +214,18 @@ async def retrieval(
         extra["metadata_condition"] = payload.metadata_condition.model_dump()
     try:
         data = await client.retrieve(
-            payload.question, payload.dataset_ids, payload.top_k,
-            document_ids=doc_ids, **extra
+            payload.question, payload.dataset_ids,
+            page_size=payload.top_n,
+            similarity_threshold=payload.similarity_threshold,
+            vector_similarity_weight=payload.vector_similarity_weight,
+            rerank_id=payload.rerank_id,
+            keyword=payload.keyword,
+            highlight=payload.highlight,
+            document_ids=doc_ids, **extra,
         )
     except RagflowError as e:
         raise _map_upstream(e) from e
-    chunks = data.get("chunks") or []
-    return {
-        "chunks": [
-            {
-                "content": c.get("content") or c.get("content_with_weight"),
-                "similarity": c.get("similarity"),
-                "document_id": c.get("document_id"),
-            }
-            for c in chunks
-        ]
-    }
+    return {"chunks": [_retrieval_chunk(c) for c in data.get("chunks") or []]}
 
 
 # ---- 功能④：打标（入库后的业务标签抽取） ----
@@ -233,6 +260,107 @@ async def tag_document(
     return {"document_id": document_id, "meta_fields": meta}
 
 
+# ---- P0-③：切片通道（查看全员 / 纠错 ADMIN）与重解析 ----
+
+
+@router.get("/datasets/{dataset_id}/documents/{document_id}/chunks")
+async def list_chunks(
+    dataset_id: str,
+    document_id: str,
+    keywords: str = Query(default="", max_length=128),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    user: User = Depends(current_user),
+    client: RagflowClient = Depends(get_ragflow),
+) -> dict:
+    _require_ragflow(client)
+    try:
+        data = await client.list_chunks_page(
+            dataset_id, document_id, keywords=keywords, page=page, page_size=page_size
+        )
+    except RagflowError as e:
+        raise _map_upstream(e) from e
+    return {
+        "chunks": [_chunk_brief(c) for c in data.get("chunks") or []],
+        "total": data.get("total"),
+    }
+
+
+@router.get("/datasets/{dataset_id}/documents/{document_id}/chunks/{chunk_id}")
+async def get_chunk(
+    dataset_id: str,
+    document_id: str,
+    chunk_id: str,
+    user: User = Depends(current_user),
+    client: RagflowClient = Depends(get_ragflow),
+) -> dict:
+    _require_ragflow(client)
+    try:
+        c = await client.get_chunk(dataset_id, document_id, chunk_id)
+    except RagflowError as e:
+        raise _map_upstream(e) from e
+    return _chunk_brief(c)
+
+
+@router.patch("/datasets/{dataset_id}/documents/{document_id}/chunks/{chunk_id}")
+async def update_chunk(
+    dataset_id: str,
+    document_id: str,
+    chunk_id: str,
+    payload: RagChunkUpdate,
+    user: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+    client: RagflowClient = Depends(get_ragflow),
+) -> dict:
+    """切片手动纠错（P0-③）：写口径与库管理一致仅 PLATFORM_ADMIN，入审计。"""
+    fields = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if not fields:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "empty chunk update")
+    try:
+        await client.update_chunk(dataset_id, document_id, chunk_id, fields)
+    except RagflowError as e:
+        raise _map_upstream(e) from e
+    _audit(
+        db, user, "chunk.update", dataset_id,
+        document_id=document_id, chunk_id=chunk_id, fields=sorted(fields),
+    )
+    return {"id": chunk_id, "updated": sorted(fields)}
+
+
+@router.delete("/datasets/{dataset_id}/documents/{document_id}/chunks/{chunk_id}", status_code=204)
+async def delete_chunk(
+    dataset_id: str,
+    document_id: str,
+    chunk_id: str,
+    user: User = Depends(require_platform_admin),
+    db: AsyncSession = Depends(get_db),
+    client: RagflowClient = Depends(get_ragflow),
+) -> None:
+    try:
+        await client.delete_chunks(dataset_id, document_id, [chunk_id])
+    except RagflowError as e:
+        raise _map_upstream(e) from e
+    _audit(db, user, "chunk.delete", dataset_id, document_id=document_id, chunk_id=chunk_id)
+
+
+@router.post("/datasets/{dataset_id}/documents/{document_id}/parse", status_code=202)
+async def parse_document(
+    dataset_id: str,
+    document_id: str,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+    client: RagflowClient = Depends(get_ragflow),
+) -> dict:
+    """重试解析（P0-③：FAIL 原因可见后的一键重解析；口径对齐上传=登录用户）。"""
+    _require_ragflow(client)
+    try:
+        await client.trigger_parse(dataset_id, [document_id])
+    except RagflowError as e:
+        raise _map_upstream(e) from e
+    _audit(db, user, "doc.parse", dataset_id, document_id=document_id)
+    return {"document_id": document_id, "accepted": True}
+
+
 # ---- 问答（检索+LLM+引用，RAGFlow Chat Assistant） ----
 
 
@@ -250,12 +378,12 @@ async def ensure_chat_assistant(
     user: User = Depends(current_user),
     client: RagflowClient = Depends(get_ragflow),
 ) -> dict:
-    """确保本租户存在 portal-assistant（绑定默认库），返回 chat_id。"""
+    """确保本租户存在 portal-assistant（绑定全量库），返回 chat_id。"""
     _require_ragflow(client)
     try:
         ds = await client.list_datasets()
         ids = [d["id"] for d in (ds.get("data") or [])] or []
-        chat_id = await client.ensure_chat(ids[:1])
+        chat_id = await client.ensure_chat(ids)
     except RagflowError as e:
         raise _map_upstream(e) from e
     return {"chat_id": chat_id}
@@ -267,12 +395,13 @@ async def chat_completions(
     user: User = Depends(current_user),
     client: RagflowClient = Depends(get_ragflow),
 ):
-    """部门知识库问答（SSE 流式，OpenAI 兼容透传，含引用）。"""
+    """部门知识库问答（SSE 流式，OpenAI 兼容透传，含引用）。
+    P0-0：assistant 绑定全量租户库（原 ids[:1] → 多库检索不全）。"""
     _require_ragflow(client)
     try:
         ds = await client.list_datasets()
         ids = [d["id"] for d in (ds.get("data") or [])] or []
-        chat_id = await client.ensure_chat(ids[:1])
+        chat_id = await client.ensure_chat(ids)
         stream = await client.stream_chat(chat_id, [m.model_dump() for m in payload.messages])
     except RagflowError as e:
         raise _map_upstream(e) from e

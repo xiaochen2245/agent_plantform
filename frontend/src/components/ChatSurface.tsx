@@ -3,16 +3,20 @@ import { Empty, Spin, Tag } from "antd";
 import { RobotOutlined } from "@ant-design/icons";
 import Composer from "./Composer";
 import Markdown from "./Markdown";
+import type { RagRef } from "../api/rag";
 
 export interface ChatTurn {
   role: "user" | "assistant";
   content: string;
-  refs?: string[];
+  /** 引用卡片全字段（契约 v2，不再截断为字符串）。 */
+  refs?: RagRef[];
 }
 
 export interface ChatStreamHandlers {
   onDelta: (text: string) => void;
-  onRefs: (refs: string[]) => void;
+  onRefs: (refs: RagRef[]) => void;
+  /** 流建立时注册 cancel 句柄，供 onStop 中止。 */
+  onStart?: (cancel: () => void) => void;
 }
 
 /** #38 会话持久化挂点：load 仅挂载/换 key 时调一次；save 每轮完成后调。 */
@@ -31,16 +35,19 @@ export interface ChatSurfaceProps {
   streamAnswer: (query: string, history: ChatTurn[], handlers: ChatStreamHandlers) => Promise<void>;
   /** 可选：接入后多轮持久化（RagKnowledge/Review/Compare 同一接口） */
   persistence?: ChatPersistence;
+  /** 可选：点击引用卡片回调（如打开切片抽屉溯源）。 */
+  onOpenRef?: (ref: RagRef) => void;
 }
 
 /**
  * 通用对话面板（全高，复用旧对话布局样式与 Composer）。
  * 知识库问答 / 文档审查问答 / 智能比对问答 共用同一交互骨架。
  */
-export default function ChatSurface({ title, description, placeholder, streamAnswer, persistence }: ChatSurfaceProps) {
+export default function ChatSurface({ title, description, placeholder, streamAnswer, persistence, onOpenRef }: ChatSurfaceProps) {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [busy, setBusy] = useState(false);
   const threadRef = useRef<HTMLDivElement>(null);
+  const cancelRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -70,7 +77,8 @@ export default function ChatSurface({ title, description, placeholder, streamAns
     setTurns([...history, { role: "assistant", content: "" }]);
     setBusy(true);
     let acc = "";
-    let refs: string[] = [];
+    let refs: RagRef[] = [];
+    cancelRef.current = null;
     try {
       await streamAnswer(query, turns, {
         onDelta: (t) => {
@@ -90,6 +98,7 @@ export default function ChatSurface({ title, description, placeholder, streamAns
             return copy;
           });
         },
+        onStart: (cancel) => { cancelRef.current = cancel; },
       });
     } catch {
       setTurns((cur) => {
@@ -98,6 +107,7 @@ export default function ChatSurface({ title, description, placeholder, streamAns
       });
     } finally {
       setBusy(false);
+      cancelRef.current = null;
       if (!acc) {
         // 无任何增量：移除空气泡
         setTurns((cur) => (cur[cur.length - 1]?.role === "assistant" && !cur[cur.length - 1].content ? cur.slice(0, -1) : cur));
@@ -135,9 +145,17 @@ export default function ChatSurface({ title, description, placeholder, streamAns
                 <div key={i} className="msg-assistant">
                   <Markdown content={t.content || "…"} />
                   {t.refs && t.refs.length > 0 && (
-                    <div style={{ marginTop: 8 }}>
-                      {t.refs.slice(0, 3).map((r, k) => (
-                        <Tag key={k} style={{ fontSize: 12 }}>来源{k + 1}: {r.slice(0, 50)}</Tag>
+                    <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 4 }}>
+                      {t.refs.map((r, k) => (
+                        <Tag
+                          key={k}
+                          color="geekblue"
+                          style={{ cursor: onOpenRef ? "pointer" : "default", fontSize: 12, maxWidth: "100%" }}
+                          onClick={() => onOpenRef?.(r)}
+                        >
+                          {r.document_name ?? `来源${k + 1}`}
+                          {r.similarity != null && ` · ${(r.similarity * 100).toFixed(0)}%`}
+                        </Tag>
                       ))}
                     </div>
                   )}
@@ -147,7 +165,7 @@ export default function ChatSurface({ title, description, placeholder, streamAns
           </div>
         )}
       </div>
-      <Composer disabled={false} streaming={busy} onSend={(q) => void send(q)} onStop={() => {}} />
+      <Composer disabled={false} streaming={busy} onSend={(q) => void send(q)} onStop={() => cancelRef.current?.()} />
     </div>
   );
 }
